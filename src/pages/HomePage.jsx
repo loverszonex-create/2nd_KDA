@@ -5,6 +5,7 @@ import robotImage from '../assets/robot.png'
 import { getTimeAgo, getMockLastMessageTime } from '../utils/timeUtils'
 import { getMockStockPrice } from '../utils/stockAPI'
 import { getChatCount, calculateProgress } from '../utils/levelSystem'
+import { removeBookmark } from '../utils/bookmarkUtils'
 
 function HomePage() {
   const navigate = useNavigate()
@@ -90,8 +91,9 @@ function HomePage() {
   const handleSearch = (e) => {
     e.preventDefault()
     if (searchQuery.trim()) {
-      // 검색어를 가지고 새로운 채팅 페이지로 이동
-      navigate(`/chat/${searchQuery}`)
+      // 검색어를 가지고 "키우Me" 채팅방으로 이동하여 LLM과 대화
+      navigate(`/chat/키우Me`, { state: { initialMessage: searchQuery } })
+      setSearchQuery('') // 검색창 초기화
     }
   }
 
@@ -233,6 +235,18 @@ function HomePage() {
     }
   }
 
+  // 북마크 삭제 핸들러
+  const handleDeleteBookmark = (e, bookmarkId) => {
+    e.stopPropagation() // 클릭 이벤트 전파 방지
+    removeBookmark(bookmarkId)
+    loadBookmarks() // 북마크 목록 새로고침
+  }
+
+  // 북마크 클릭 시 채팅방으로 이동
+  const handleBookmarkClick = (bookmark) => {
+    navigate(`/chat/${bookmark.stockName}`, { state: { scrollToMessage: bookmark.messageId } })
+  }
+
   const displayedStocks = activeTab === 'home' ? homeStocks : (activeTab === 'all' ? allStocks : [])
 
   return (
@@ -292,13 +306,23 @@ function HomePage() {
           src={robotImage}
           alt="AI Robot"
         />
-
+        {/* 오늘의 날씨 */}
+        <div className="absolute right-4 top-[-1px] text-left mb-2">
+          <div className="relative inline-flex items-center gap-1 px-2 py-1 rounded-full overflow-hidden" style={{ 
+            zIndex: 10, 
+            background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.15))',
+            backdropFilter: 'blur(10px)'
+          }}>
+            <span className="text-white text-xs font">오늘의 온도 : </span>
+            <span className="text-xs">🙂⚪</span>
+          </div>
+        </div>
         {/* 오른쪽 상단 영역 */}
-        <div className="absolute right-[30px] top-[33px]">
+        <div className="absolute right-[30px] top-[40px]">
           {/* 레벨 배지 */}
           <div className="relative inline-flex items-center gap-1 px-1.5 rounded-full mb-1 overflow-hidden" style={{ zIndex: 10, backgroundColor: 'rgba(30, 27, 75, 0.4)', paddingTop: '2px', paddingBottom: '3px' }}>
             <div className="w-3.5 h-3.5 bg-yellow-400 rounded-full flex-shrink-0" style={{ zIndex: 2 }}></div>
-            <span className="text-yellow-400 text-xs font-normal leading-none" style={{ zIndex: 2 }}>Lv.{String(levelInfo.level).padStart(2, '0')}</span>
+            <span className="text-yellow-400 text-xs font-semibold leading-none" style={{ zIndex: 2 }}>Lv.{String(levelInfo.level).padStart(2, '0')}</span>
             
             {/* Progress Bar inside badge */}
             <div className="absolute bottom-0 left-0 w-full bg-yellow-400 transition-all duration-500 ease-out" style={{ width: `${levelInfo.progress}%`, height: '1px', zIndex: 1 }}>
@@ -307,7 +331,7 @@ function HomePage() {
           
           {/* 타이틀 */}
           <div className="text-left mb-2">
-            <h1 className="text-white font-semibold leading-tight" style={{ fontSize: '1.28rem' }}>
+            <h1 className="text-white font-bold leading-tight" style={{ fontSize: '1.28rem' }}>
               종목과 대화하기<br/>키우Me
             </h1>
           </div>
@@ -435,10 +459,20 @@ function HomePage() {
                 {bookmarks.map((bookmark) => (
                   <div
                     key={bookmark.id}
-                    className="w-full bg-white rounded-[10px] shadow-[0px_4px_4px_0px_rgba(0,0,0,0.09)] p-4 text-left hover:shadow-lg transition-all relative group cursor-default"
+                    onClick={() => handleBookmarkClick(bookmark)}
+                    className="w-full bg-white rounded-[10px] shadow-[0px_4px_4px_0px_rgba(0,0,0,0.09)] p-4 text-left hover:shadow-lg transition-all relative group cursor-pointer"
                   >
+                    {/* 삭제 버튼 - 우측 상단 */}
+                    <button
+                      onClick={(e) => handleDeleteBookmark(e, bookmark.id)}
+                      className="absolute top-3 right-3 w-6 h-6 rounded-full bg-gray-100 hover:bg-red-100 flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100"
+                      title="북마크 삭제"
+                    >
+                      <X className="w-4 h-4 text-gray-600 hover:text-red-600" />
+                    </button>
+
                     {/* 종목명 + 타임스탬프 */}
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center gap-2 mb-2 pr-8">
                       <span className="text-indigo-600 text-sm font-semibold">{bookmark.stockName}</span>
                       <span className="text-gray-400 text-xs">{bookmark.timestamp}</span>
                     </div>

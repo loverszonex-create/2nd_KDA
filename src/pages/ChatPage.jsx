@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { ChevronLeft, MoreVertical, Info, Send, Signal, Wifi, Battery, BatteryCharging, Navigation, Bookmark } from 'lucide-react'
 import { getAIResponse, getFormattedTimestamp } from '../utils/chatAPI'
 import { incrementChatCount, isLevelUp, calculateProgress } from '../utils/levelSystem'
@@ -8,6 +8,7 @@ import { addBookmark, removeBookmark, isBookmarked, findBookmarkByMessageId } fr
 function ChatPage() {
   const { stockName } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const [message, setMessage] = useState('')
   const [currentTime, setCurrentTime] = useState(new Date())
   const [isCharging, setIsCharging] = useState(false)
@@ -53,6 +54,22 @@ function ChatPage() {
       setUserNickname(storedNickname)
     }
   }, [])
+
+  // HomePage에서 전달된 초기 메시지 자동 전송
+  useEffect(() => {
+    const initialMessage = location.state?.initialMessage
+    if (initialMessage && initialMessage.trim()) {
+      // 약간의 딜레이 후 메시지 자동 전송
+      setTimeout(() => {
+        setMessage(initialMessage)
+        // 자동으로 메시지 전송
+        handleSuggestionClick(initialMessage)
+      }, 500)
+      
+      // state 정리 (재방문 시 재전송 방지)
+      window.history.replaceState({}, document.title)
+    }
+  }, [location.state])
   
   // 북마크된 메시지 로드
   useEffect(() => {
@@ -100,6 +117,23 @@ function ChatPage() {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  // 북마크에서 온 경우 해당 메시지로 스크롤
+  useEffect(() => {
+    const scrollToMessageId = location.state?.scrollToMessage
+    if (scrollToMessageId && messages.length > 0) {
+      // 약간의 지연을 주어 DOM이 완전히 렌더링된 후 스크롤
+      setTimeout(() => {
+        const messageElement = document.getElementById(`message-${scrollToMessageId}`)
+        if (messageElement) {
+          messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
+      }, 300)
+      
+      // state 정리 (재방문 시 스크롤 방지)
+      window.history.replaceState({}, document.title)
+    }
+  }, [location.state, messages])
 
   // 실시간 시간 업데이트
   useEffect(() => {
@@ -266,25 +300,40 @@ function ChatPage() {
         </div>
       </div>
 
-      {/* Header - HomePage와 동일 스타일 */}
-      <div className="w-full h-[50px] relative flex items-center justify-between px-5" style={{ backgroundColor: '#606CF2' }}>
-        {/* Left: Back Button */}
-        <button onClick={() => navigate('/')}>
-          <ChevronLeft className="w-6 h-6 text-white" />
-        </button>
-        
-        {/* Center: 종목명 + Beta */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-2">
-          <span className="text-white text-lg font-normal">{stockName} 키우Me</span>
-          <div className="px-2 py-0.5 bg-blue-950/40 rounded-full flex items-center justify-center">
-            <span className="text-white text-xs font-normal leading-none">Beta</span>
+      {/* Header - 2줄 구조 */}
+      <div className="w-full relative px-5 py-2" style={{ backgroundColor: '#606CF2' }}>
+        {/* 상단 줄: 버튼들과 종목명 + Beta */}
+        <div className="flex items-center justify-between mb-2">
+          {/* Left: Back Button */}
+          <button onClick={() => navigate('/')}>
+            <ChevronLeft className="w-6 h-6 text-white" />
+          </button>
+          
+          {/* Center: 종목명 + Beta */}
+          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
+            <span className="text-white text-lg font-normal">{stockName} 키우Me</span>
+            <div className="px-2 py-0.5 bg-blue-950/40 rounded-full flex items-center justify-center">
+              <span className="text-white text-xs font-normal leading-none">Beta</span>
+            </div>
+          </div>
+          
+          {/* Right: More Button */}
+          <button>
+            <MoreVertical className="w-6 h-6 text-white" />
+          </button>
+        </div>
+
+        {/* 하단 줄: 오늘의 온도 */}
+        <div className="flex justify-center">
+          <div className="relative inline-flex items-center gap-1 px-2 py-1 rounded-full overflow-hidden" style={{ 
+            zIndex: 10, 
+            background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.15))',
+            backdropFilter: 'blur(10px)'
+          }}>
+            <span className="text-white text-xs font">오늘의 온도 : </span>
+            <span className="text-xs">🙂⚪</span>
           </div>
         </div>
-        
-        {/* Right: More Button */}
-        <button>
-          <MoreVertical className="w-6 h-6 text-white" />
-        </button>
       </div>
 
       {/* Messages Container */}
@@ -330,7 +379,7 @@ function ChatPage() {
             const isMarked = bookmarkedMessages.has(messageId)
             
             return (
-              <div key={msg.id} className="w-full">
+              <div key={msg.id} id={`message-${messageId}`} className="w-full transition-all duration-300">
                 <div className="flex items-center gap-3 mb-2">
                   <div className="w-7 h-7 bg-neutral-400 rounded-full" />
                   <span className="text-black text-base">{msg.sender}</span>
@@ -396,23 +445,25 @@ function ChatPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area - HomePage 스타일 */}
+      {/* Input Area - HomePage와 동일한 디자인 */}
       <div className="w-full h-24 bg-white relative flex items-center justify-center px-5">
-        <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="w-full max-w-[348px] h-14">
+        <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="w-[350px]" style={{ height: '38.4px' }}>
           <div className="relative w-full h-full p-[2px] bg-gradient-to-r from-cyan-500 via-blue-400 to-fuchsia-400 rounded-full shadow-lg">
-            <div className="w-full h-full bg-white rounded-full flex items-center px-5">
+            <div className="w-full h-full bg-white rounded-full flex items-center px-4">
               <input
                 type="text"
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder="키우Me에게 물어보세요"
-                className="flex-1 bg-transparent outline-none text-indigo-600 text-base placeholder:text-indigo-400"
+                className="flex-1 bg-transparent outline-none text-sm"
+                style={{ color: '#717BE4' }}
               />
               <button 
                 type="submit"
-                className="w-12 h-12 bg-gradient-to-b from-cyan-500 via-blue-400 to-fuchsia-400 rounded-full flex items-center justify-center -mr-[18px]"
+                className="rounded-full flex items-center justify-center flex-shrink-0"
+                style={{ background: 'linear-gradient(60deg, #06b6d4, #60a5fa, #e879f9)', width: '34.4px', height: '34.4px', marginRight: '-15.2px' }}
               >
-                <Send className="w-5 h-5 text-white rotate-[18deg]" />
+                <Send className="w-4 h-4 text-white" strokeWidth={2.5} />
               </button>
             </div>
           </div>

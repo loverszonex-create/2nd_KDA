@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, Signal, Wifi, Battery, BatteryCharging, Navigation } from 'lucide-react'
+import { ChevronLeft, Signal, Wifi, Battery, BatteryCharging, Navigation, X } from 'lucide-react'
+import { removeBookmark } from '../utils/bookmarkUtils'
 
 function BookmarkPage() {
   const navigate = useNavigate()
@@ -62,6 +63,13 @@ function BookmarkPage() {
     navigate(`/chat/${bookmark.stockName}`, { state: { scrollToMessage: bookmark.messageId } })
   }
 
+  // 북마크 삭제 핸들러
+  const handleDeleteBookmark = (e, bookmarkId) => {
+    e.stopPropagation() // 클릭 이벤트 전파 방지
+    removeBookmark(bookmarkId)
+    loadBookmarks() // 북마크 목록 새로고침
+  }
+
   return (
     <div className="w-full h-screen relative bg-white overflow-hidden">
       {/* Status Bar */}
@@ -103,13 +111,22 @@ function BookmarkPage() {
           ) : (
             <div className="space-y-4">
               {bookmarks.map((bookmark) => (
-                <button
+                <div
                   key={bookmark.id}
                   onClick={() => handleBookmarkClick(bookmark)}
-                  className="w-full bg-white rounded-[10px] shadow-[0px_4px_4px_0px_rgba(0,0,0,0.09)] p-4 text-left hover:shadow-lg transition-all"
+                  className="w-full bg-white rounded-[10px] shadow-[0px_4px_4px_0px_rgba(0,0,0,0.09)] p-4 text-left hover:shadow-lg transition-all relative group cursor-pointer"
                 >
+                  {/* 삭제 버튼 - 우측 상단 */}
+                  <button
+                    onClick={(e) => handleDeleteBookmark(e, bookmark.id)}
+                    className="absolute top-3 right-3 w-6 h-6 rounded-full bg-gray-100 hover:bg-red-100 flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100"
+                    title="북마크 삭제"
+                  >
+                    <X className="w-4 h-4 text-gray-600 hover:text-red-600" />
+                  </button>
+
                   {/* 종목명 */}
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center gap-2 mb-2 pr-8">
                     <span className="text-indigo-600 text-sm font-semibold">{bookmark.stockName}</span>
                     <span className="text-gray-400 text-xs">{bookmark.timestamp}</span>
                   </div>
@@ -118,7 +135,7 @@ function BookmarkPage() {
                   <p className="text-gray-800 text-sm leading-relaxed line-clamp-3">
                     {bookmark.content}
                   </p>
-                </button>
+                </div>
               ))}
             </div>
           )}
