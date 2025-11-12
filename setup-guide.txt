@@ -1,0 +1,90 @@
+========================================
+백엔드-프론트엔드 통합 실행 가이드
+========================================
+
+📋 1단계: 의존성 설치
+-----------------------
+루트 디렉토리(myVibe)에서:
+> npm install
+
+백엔드 디렉토리에서:
+> cd jujuclub\services\gateway
+> npm install
+> cd ..\..\..
+
+📋 2단계: 환경 변수 설정
+-----------------------
+jujuclub\.env.gateway 파일을 생성하고 아래 내용을 채우세요:
+
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+OPENAI_API_KEY=sk-your-openai-key
+GROQ_API_KEY=your_groq_key
+UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your_redis_token
+PORT=8080
+
+* API 키 발급 안내:
+  - Supabase: https://supabase.com
+  - OpenAI: https://platform.openai.com
+  - Groq: https://console.groq.com
+  - Upstash: https://upstash.com
+
+📋 3단계: 서버 실행
+-----------------------
+
+옵션 A - 배치 파일 사용 (간편):
+> start-all.bat
+
+옵션 B - npm 스크립트 사용:
+> npm run start:all
+
+옵션 C - 개별 실행 (디버깅용):
+
+터미널 1 - 백엔드:
+> npm run backend
+또는
+> start-backend.bat
+
+터미널 2 - 프론트엔드:
+> npm run dev
+또는
+> start-frontend.bat
+
+📋 4단계: 확인
+-----------------------
+- 프론트엔드: http://localhost:3000
+- 백엔드: http://localhost:8080
+- 백엔드 헬스체크: http://localhost:8080/health
+
+✅ 성공적으로 실행되면:
+   - 백엔드 터미널에 "gateway :8080" 메시지 표시
+   - 프론트엔드가 자동으로 브라우저에서 열림
+   - 챗봇에서 질문하면 실제 AI 응답 수신
+
+🐛 문제 해결
+-----------------------
+1. "concurrently를 찾을 수 없습니다" 에러
+   → npm install 실행
+
+2. 백엔드가 시작되지 않음
+   → jujuclub\.env.gateway 파일 확인
+   → 모든 API 키가 올바르게 설정되었는지 확인
+
+3. 포트 충돌 (8080 또는 3000 사용 중)
+   → 다른 프로그램이 해당 포트를 사용 중인지 확인
+   → netstat -ano | findstr "8080"
+   → netstat -ano | findstr "3000"
+
+4. 프론트엔드에서 Mock 응답만 나옴
+   → 백엔드가 정상 실행 중인지 확인
+   → http://localhost:8080/health 접속해서 확인
+
+📚 추가 문서
+-----------------------
+- QUICK_START.md - 빠른 시작 가이드
+- INTEGRATION_GUIDE.md - 상세 통합 가이드
+- README.md - 전체 프로젝트 개요
+
+========================================
+

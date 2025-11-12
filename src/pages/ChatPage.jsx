@@ -4,6 +4,20 @@ import { ChevronLeft, MoreVertical, Info, Send, Signal, Wifi, Battery, BatteryCh
 import { getAIResponse, getFormattedTimestamp } from '../utils/chatAPI'
 import { incrementChatCount, isLevelUp, calculateProgress } from '../utils/levelSystem'
 import { addBookmark, removeBookmark, isBookmarked, findBookmarkByMessageId } from '../utils/bookmarkUtils'
+import StockLogo from '../components/StockLogo'
+
+// mood에서 이모지만 추출하는 함수
+const getMoodEmoji = (mood) => {
+  if (!mood) return '😐'
+  const moodMap = {
+    '😄 매우 기쁨': '😄',
+    '🙂 기쁨': '🙂',
+    '😐 보통': '😐',
+    '☹️ 슬픔': '☹️',
+    '😭 매우 슬픔': '😭'
+  }
+  return moodMap[mood] || mood.split(' ')[0] || '😐'
+}
 
 function ChatPage() {
   const { stockName } = useParams()
@@ -46,6 +60,45 @@ function ChatPage() {
   ])
   const messagesEndRef = useRef(null)
   const [bookmarkedMessages, setBookmarkedMessages] = useState(new Set())
+  const [currentMood, setCurrentMood] = useState('😐 보통')
+  
+  // 종목명 -> 티커 매핑
+  const STOCK_NAME_TO_TICKER = {
+    '삼성전자': '005930.KS',
+    'SK하이닉스': '000660.KS',
+    '삼성SDI': '006400.KS',
+    '현대차': '005380.KS',
+    'LG에너지솔루션': '373220.KS',
+    '기아': '000270.KS',
+    '에코프로': '086520.KS'
+  }
+  
+  // 초기 mood 로드
+  useEffect(() => {
+    const loadMood = async () => {
+      try {
+        const ticker = STOCK_NAME_TO_TICKER[stockName] || '005930.KS'
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+        const response = await fetch(`${API_BASE_URL}/mood/${ticker}`)
+        
+        if (response.ok) {
+          const data = await response.json()
+          if (data.ok && data.mood) {
+            setCurrentMood(data.mood)
+          }
+        }
+      } catch (error) {
+        console.error('Mood 로드 실패:', error)
+      }
+    }
+    
+    loadMood()
+    
+    // 5분마다 mood 업데이트
+    const moodTimer = setInterval(loadMood, 5 * 60 * 1000)
+    
+    return () => clearInterval(moodTimer)
+  }, [stockName])
   
   // 닉네임 로드
   useEffect(() => {
@@ -196,6 +249,11 @@ function ChatPage() {
       try {
         const response = await getAIResponse(userMessage, stockName, userNickname)
         
+        // mood 업데이트
+        if (response.metadata && response.metadata.mood) {
+          setCurrentMood(response.metadata.mood)
+        }
+        
         setMessages(prev => {
           const withoutSuggestions = prev.filter(msg => msg.type !== 'suggestions')
           return [
@@ -255,6 +313,11 @@ function ChatPage() {
     try {
       const response = await getAIResponse(suggestion, stockName, userNickname)
       
+      // mood 업데이트
+      if (response.metadata && response.metadata.mood) {
+        setCurrentMood(response.metadata.mood)
+      }
+      
       setMessages(prev => {
         const withoutSuggestions = prev.filter(msg => msg.type !== 'suggestions')
         return [
@@ -302,14 +365,14 @@ function ChatPage() {
 
       {/* Header - 2줄 구조 */}
       <div className="w-full relative px-5 py-2" style={{ backgroundColor: '#606CF2' }}>
-        {/* 상단 줄: 버튼들과 종목명 + Beta */}
+        {/* 상단 줄: 버튼들과 종목명 키우Me */}
         <div className="flex items-center justify-between mb-2">
           {/* Left: Back Button */}
           <button onClick={() => navigate('/')}>
             <ChevronLeft className="w-6 h-6 text-white" />
           </button>
           
-          {/* Center: 종목명 + Beta */}
+          {/* Center: 종목명 키우Me */}
           <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
             <span className="text-white text-lg font-normal">{stockName} 키우Me</span>
             <div className="px-2 py-0.5 bg-blue-950/40 rounded-full flex items-center justify-center">
@@ -331,7 +394,7 @@ function ChatPage() {
             backdropFilter: 'blur(10px)'
           }}>
             <span className="text-white text-xs font">오늘의 온도 : </span>
-            <span className="text-xs">🙂⚪</span>
+            <span className="text-xs">{getMoodEmoji(currentMood)}⚪</span>
           </div>
         </div>
       </div>
@@ -381,8 +444,15 @@ function ChatPage() {
             return (
               <div key={msg.id} id={`message-${messageId}`} className="w-full transition-all duration-300">
                 <div className="flex items-center gap-3 mb-2">
-                  <div className="w-7 h-7 bg-neutral-400 rounded-full" />
-                  <span className="text-black text-base">{msg.sender}</span>
+                  {/* 프로필 로고 */}
+                  <div className="w-7 h-7 rounded-full overflow-hidden flex items-center justify-center border border-stone-300 bg-white">
+                    <StockLogo stockName={stockName} size="xs" />
+                  </div>
+                  {/* 닉네임 + Mood 이모지 */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-black text-base">{msg.sender}</span>
+                    <span className="text-sm">{getMoodEmoji(currentMood)}</span>
+                  </div>
                 </div>
                 <div className="max-w-[340px] px-5 py-4 bg-color-white-solid rounded-tl-lg rounded-tr-2xl rounded-bl-2xl rounded-br-2xl shadow-md">
                   {msg.content.map((paragraph, idx) => (

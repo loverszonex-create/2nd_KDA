@@ -105,7 +105,53 @@ export async function getMultipleStockPrices(stockCodes) {
 }
 
 /**
- * Mock 데이터 (개발/테스트용)
+ * 백엔드 API를 통한 실시간 주가 조회
+ * @param {string} stockCode - 종목 코드 (예: '005930')
+ */
+export async function getRealtimeStockPrice(stockCode) {
+  try {
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+    const response = await fetch(`${API_BASE_URL}/stock/${stockCode}`)
+    
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status}`)
+    }
+    
+    const data = await response.json()
+    return data
+  } catch (error) {
+    console.error('실시간 주가 조회 실패:', error)
+    return null
+  }
+}
+
+/**
+ * 여러 종목의 실시간 주가를 한번에 조회
+ * @param {Object} stockMap - { 종목명: 종목코드 } 형식
+ */
+export async function getMultipleRealtimeStockPrices(stockMap) {
+  const results = {}
+  
+  for (const [name, code] of Object.entries(stockMap)) {
+    const data = await getRealtimeStockPrice(code)
+    if (data) {
+      results[name] = {
+        currentPrice: data.last_price,
+        changeRate: data.pct_change,
+        volume: data.volume,
+        provider: data.provider
+      }
+    } else {
+      // 실패 시 Mock 데이터 사용
+      results[name] = getMockStockPrice(name)
+    }
+  }
+  
+  return results
+}
+
+/**
+ * Mock 데이터 (개발/테스트용 및 백엔드 연결 실패 시 폴백)
  */
 export function getMockStockPrice(stockName) {
   const mockData = {

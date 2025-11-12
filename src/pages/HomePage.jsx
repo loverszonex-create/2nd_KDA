@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Search, Star, Menu, Signal, Wifi, Battery, BatteryCharging, Navigation, Send, X } from 'lucide-react'
 import robotImage from '../assets/robot.png'
 import { getTimeAgo, getMockLastMessageTime } from '../utils/timeUtils'
-import { getMockStockPrice } from '../utils/stockAPI'
+import { getMockStockPrice, getMultipleRealtimeStockPrices, STOCK_CODE_MAP } from '../utils/stockAPI'
 import { getChatCount, calculateProgress } from '../utils/levelSystem'
 import { removeBookmark } from '../utils/bookmarkUtils'
 
@@ -14,6 +14,7 @@ function HomePage() {
   const [currentTime, setCurrentTime] = useState(new Date())
   const [isCharging, setIsCharging] = useState(false)
   const [timeUpdateTrigger, setTimeUpdateTrigger] = useState(0)
+  const [stockPrices, setStockPrices] = useState({})
   
   // 레벨 시스템 상태
   const [levelInfo, setLevelInfo] = useState({
@@ -25,6 +26,32 @@ function HomePage() {
     levelName: '새싹 투자자',
     nextLevelName: '초보 투자자'
   })
+
+  // 실시간 주가 데이터 로드
+  useEffect(() => {
+    const loadStockPrices = async () => {
+      try {
+        const prices = await getMultipleRealtimeStockPrices(STOCK_CODE_MAP)
+        setStockPrices(prices)
+      } catch (error) {
+        console.error('주가 데이터 로드 실패:', error)
+        // 실패 시 Mock 데이터 사용
+        const mockPrices = {}
+        Object.keys(STOCK_CODE_MAP).forEach(name => {
+          mockPrices[name] = getMockStockPrice(name)
+        })
+        setStockPrices(mockPrices)
+      }
+    }
+    
+    // 초기 로드
+    loadStockPrices()
+    
+    // 5분마다 업데이트
+    const priceTimer = setInterval(loadStockPrices, 5 * 60 * 1000)
+    
+    return () => clearInterval(priceTimer)
+  }, [])
 
   // 레벨 정보 로드
   useEffect(() => {
@@ -98,6 +125,13 @@ function HomePage() {
   }
 
       // 홈 탭 - 전체 8개 종목
+      const getChangeRate = (name) => {
+        const price = stockPrices[name]
+        if (!price || price.changeRate === undefined) return 'N/A'
+        const rate = price.changeRate
+        return rate >= 0 ? `+${rate.toFixed(2)}%` : `${rate.toFixed(2)}%`
+      }
+
       const homeStocks = [
     {
       id: 1,
@@ -106,7 +140,7 @@ function HomePage() {
       lastMessage: '초심으로 돌아가자 .. 10만전자 될까?',
       lastMessageTime: getMockLastMessageTime(0.5), // 30초 전
       badge: '국내',
-      changeRate: '-0.19%',
+      changeRate: getChangeRate('삼성전자'),
       logo: 'samsung'
     },
     {
@@ -116,7 +150,7 @@ function HomePage() {
       lastMessage: 'K-양극재 신화',
       lastMessageTime: getMockLastMessageTime(5), // 5분 전
       badge: '국내',
-      changeRate: '-1.66%',
+      changeRate: getChangeRate('에코프로'),
       logo: 'battery'
     },
     {
@@ -126,7 +160,7 @@ function HomePage() {
       lastMessage: '꿈의 배터리 선도주자',
       lastMessageTime: getMockLastMessageTime(10), // 10분 전
       badge: '국내',
-      changeRate: '-1.66%',
+      changeRate: getChangeRate('삼성SDI'),
       logo: 'samsungsdi'
     },
     {
@@ -136,7 +170,7 @@ function HomePage() {
       lastMessage: '명실상부 자동차 대장주',
       lastMessageTime: getMockLastMessageTime(30), // 30분 전
       badge: '국내',
-      changeRate: '-1.66%',
+      changeRate: getChangeRate('현대차'),
       logo: 'hyundai'
     },
     {
@@ -146,7 +180,7 @@ function HomePage() {
       lastMessage: '글로벌 1위 K-배터리',
       lastMessageTime: getMockLastMessageTime(60), // 1시간 전
       badge: '국내',
-      changeRate: '-1.66%',
+      changeRate: getChangeRate('LG에너지솔루션'),
       logo: 'lg'
     },
     {
@@ -156,7 +190,7 @@ function HomePage() {
       lastMessage: 'RV/하이브리드 글로벌 강자',
       lastMessageTime: getMockLastMessageTime(120), // 2시간 전
       badge: '국내',
-      changeRate: '-1.66%',
+      changeRate: getChangeRate('기아'),
       logo: 'kia'
     },
     {
@@ -166,7 +200,7 @@ function HomePage() {
       lastMessage: 'HBM 시장 선두주자',
       lastMessageTime: getMockLastMessageTime(1440), // 어제 (24시간 전)
       badge: '국내',
-      changeRate: '+2.15%',
+      changeRate: getChangeRate('SK하이닉스'),
       logo: 'sk'
     },
     {
@@ -176,7 +210,7 @@ function HomePage() {
       lastMessage: '@미래에셋증권 @하나금융지주',
       lastMessageTime: getMockLastMessageTime(1500), // 25시간 전
       badge: '국내',
-      changeRate: '+0.85%',
+      changeRate: getChangeRate('금융주 팀톡'),
       logo: 'finance'
     }
   ]
@@ -190,7 +224,7 @@ function HomePage() {
       lastMessage: '초심으로 돌아가자 .. 10만전자 될까?',
       lastMessageTime: getMockLastMessageTime(0.5), // 30초 전
       badge: '국내',
-      changeRate: '-0.19%',
+      changeRate: getChangeRate('삼성전자'),
       logo: 'samsung'
     },
     {
@@ -200,7 +234,7 @@ function HomePage() {
       lastMessage: 'HBM 시장 선두주자',
       lastMessageTime: getMockLastMessageTime(1440), // 어제
       badge: '국내',
-      changeRate: '+2.15%',
+      changeRate: getChangeRate('SK하이닉스'),
       logo: 'sk'
     },
     {
@@ -210,7 +244,7 @@ function HomePage() {
       lastMessage: '@미래에셋증권 @하나금융지주',
       lastMessageTime: getMockLastMessageTime(1500), // 25시간 전
       badge: '국내',
-      changeRate: '+0.85%',
+      changeRate: getChangeRate('금융주 팀톡'),
       logo: 'finance'
     }
   ]

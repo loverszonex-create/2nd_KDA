@@ -1,0 +1,10 @@
+{
+  "name": "jujuclub",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@upstash/redis": "^1.28.3",
+    "axios": "^1.13.2",
+    "dotenv": "^16.4.5"
+  }
+}

@@ -1,4 +1,14 @@
-// Mock AI responses - 나중에 실제 LLM API로 교체될 부분
+// API Base URL
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+
+// 종목명을 티커로 변환하는 매핑
+const STOCK_NAME_TO_TICKER = {
+  '삼성전자': '005930.KS',
+  'SK하이닉스': '000660.KS',
+  '삼성SDI': '006400.KS'
+}
+
+// Mock AI responses - 백엔드 연결 실패 시 폴백용
 const mockResponses = {
   '삼성전자': {
     'AI 버블론은 뭐였는데?': {
@@ -202,22 +212,121 @@ const mockResponses = {
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
 /**
- * AI 응답을 가져오는 함수
+ * AI 응답을 가져오는 함수 - 실제 백엔드 API와 연동
  * @param {string} userMessage - 사용자 메시지
  * @param {string} stockName - 종목명
  * @param {string} userNickname - 사용자 닉네임 (선택적)
- * @returns {Promise<{content: string[], suggestions: string[]}>}
- * 
- * TODO: 실제 LLM API 연동 시 교체 필요
- * - OpenAI API
- * - Claude API
- * - 자체 LLM 서버
- * - 실제 LLM API에서는 시스템 프롬프트에 사용자 닉네임을 포함시켜 "@@님"으로 호칭하도록 설정
+ * @param {Function} onDelta - 스트리밍 중 델타 텍스트를 받을 콜백 (선택적)
+ * @returns {Promise<{content: string[], suggestions: string[], metadata: object}>}
  */
-export async function getAIResponse(userMessage, stockName, userNickname = '회원') {
-  // API 호출 시뮬레이션 (0.5~1.5초)
-  await delay(500 + Math.random() * 1000)
+export async function getAIResponse(userMessage, stockName, userNickname = '회원', onDelta = null) {
+  try {
+    // 종목명을 티커로 변환
+    const ticker = STOCK_NAME_TO_TICKER[stockName] || '005930.KS'
+    
+    // API URL 구성
+    const url = `${API_BASE_URL}/chat?q=${encodeURIComponent(userMessage)}&ticker=${encodeURIComponent(ticker)}&stream=true`
+    
+    // SSE (Server-Sent Events) 스트리밍 연결
+    const response = await fetch(url)
+    
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status}`)
+    }
 
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    
+    let fullText = ''
+    let metadata = {}
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      
+      if (done) break
+      
+      // 청크 디코딩
+      buffer += decoder.decode(value, { stream: true })
+      
+      // SSE 형식 파싱 (data: {...}\n\n)
+      const lines = buffer.split('\n\n')
+      buffer = lines.pop() || '' // 마지막 불완전한 줄은 버퍼에 보관
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const jsonStr = line.slice(6) // 'data: ' 제거
+            const data = JSON.parse(jsonStr)
+            
+            if (data.delta) {
+              fullText += data.delta
+              // 스트리밍 콜백 호출
+              if (onDelta) {
+                onDelta(data.delta)
+              }
+            }
+            
+            if (data.done) {
+              // 최종 데이터 수신
+              fullText = data.full || fullText
+              metadata = {
+                asOf: data.asOf,
+                mood: data.mood,
+                news: data.news,
+                macro: data.macro,
+                visuals: data.visuals
+              }
+            }
+          } catch (e) {
+            console.error('SSE 파싱 오류:', e)
+          }
+        }
+      }
+    }
+
+    // 제안 질문 추출 (LLM이 생성한 제안)
+    let suggestions = []
+    let cleanText = fullText
+    
+    // [SUGGEST]질문1|질문2[/SUGGEST] 형식 파싱
+    const suggestMatch = fullText.match(/\[SUGGEST\](.*?)\[\/SUGGEST\]/s)
+    if (suggestMatch) {
+      const suggestText = suggestMatch[1].trim()
+      suggestions = suggestText.split('|').map(s => s.trim()).filter(s => s.length > 0)
+      // 제안 부분 제거
+      cleanText = fullText.replace(/\[SUGGEST\].*?\[\/SUGGEST\]/s, '').trim()
+    }
+    
+    // 제안이 없으면 기본 제안 사용
+    if (suggestions.length === 0) {
+      suggestions = extractSuggestions(cleanText, stockName)
+    }
+
+    // 텍스트를 단락으로 분리
+    const paragraphs = cleanText
+      .split('\n\n')
+      .map(p => p.trim())
+      .filter(p => p.length > 0)
+
+    return {
+      content: paragraphs,
+      suggestions: suggestions,
+      metadata: metadata
+    }
+
+  } catch (error) {
+    console.error('백엔드 API 연동 실패, Mock 응답 사용:', error)
+    
+    // 폴백: Mock 응답 사용
+    return getMockResponse(userMessage, stockName, userNickname)
+  }
+}
+
+/**
+ * Mock 응답 가져오기 (백엔드 연결 실패 시 폴백)
+ */
+function getMockResponse(userMessage, stockName, userNickname) {
   // 종목별 응답 데이터 가져오기
   const stockResponses = mockResponses[stockName] || mockResponses['삼성전자']
   
@@ -245,16 +354,32 @@ export async function getAIResponse(userMessage, stockName, userNickname = '회�
     response = stockResponses['default'] || mockResponses['삼성전자']['default']
   }
 
-  // 응답의 첫 번째 문장에 닉네임 추가 (Mock 전용, 실제 LLM은 자체적으로 처리)
+  // 응답의 첫 번째 문장에 닉네임 추가
   const responseWithNickname = {
     ...response,
     content: [
       `${userNickname}님, ${response.content[0]}`,
       ...response.content.slice(1)
-    ]
+    ],
+    metadata: {}
   }
 
   return responseWithNickname
+}
+
+/**
+ * AI 응답에서 제안 질문 추출
+ */
+function extractSuggestions(text, stockName) {
+  // 기본 제안 질문 (추후 개선 가능)
+  const defaultSuggestions = [
+    '최근 뉴스 알려줘',
+    '투자 의견을 알려줘',
+    '경쟁사와 비교해줘',
+    '배당금은 얼마야?'
+  ]
+  
+  return defaultSuggestions.slice(0, 2)
 }
 
 /**

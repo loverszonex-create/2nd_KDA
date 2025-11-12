@@ -39,26 +39,85 @@
 
 ## 기술 스택
 
-- **Frontend Framework**: React 18
+### Frontend
+- **Framework**: React 18
 - **Build Tool**: Vite
 - **Styling**: Tailwind CSS
 - **Routing**: React Router DOM v6
 - **Charts**: Recharts
 - **Icons**: Lucide React
 
-## 설치 및 실행
+### Backend
+- **Framework**: Express.js
+- **AI/LLM**: OpenAI, Groq (Llama 3.1)
+- **Database**: Supabase (PostgreSQL)
+- **Cache**: Upstash Redis
+- **APIs**: 
+  - 한국투자증권 (KIS) API
+  - KRX (한국거래소) API
+  - CNN Fear & Greed Index
+  - ADR 데이터 크롤링
 
-### 1. 의존성 설치
+## 🚀 빠른 시작
+
+### 필수 사항
+1. Node.js 18+ 설치
+2. API 키 준비:
+   - Supabase (https://supabase.com)
+   - OpenAI (https://platform.openai.com)
+   - Groq (https://console.groq.com)
+   - Upstash Redis (https://upstash.com)
+
+### 설치 및 실행
+
+#### 1️⃣ 의존성 설치
 ```bash
+# 프론트엔드 의존성
 npm install
+
+# 백엔드 의존성
+cd jujuclub/services/gateway
+npm install
+cd ../../..
 ```
 
-### 2. 개발 서버 실행
+#### 2️⃣ 환경 변수 설정
+`jujuclub/.env.gateway` 파일을 생성하고 API 키를 설정하세요:
 ```bash
+# 예시는 jujuclub/.env.gateway.example 참고
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_key
+OPENAI_API_KEY=your_openai_key
+GROQ_API_KEY=your_groq_key
+UPSTASH_REDIS_REST_URL=your_redis_url
+UPSTASH_REDIS_REST_TOKEN=your_redis_token
+PORT=8080
+```
+
+#### 3️⃣ 서버 실행
+
+**방법 1: 원클릭 실행 (Windows)**
+```bash
+start-all.bat
+```
+
+**방법 2: npm 스크립트**
+```bash
+npm run start:all
+```
+
+**방법 3: 개별 실행**
+```bash
+# 터미널 1 - 백엔드
+npm run backend
+
+# 터미널 2 - 프론트엔드
 npm run dev
 ```
 
-애플리케이션이 `http://localhost:3000`에서 실행됩니다.
+애플리케이션 접속:
+- **프론트엔드**: http://localhost:3000
+- **백엔드**: http://localhost:8080
 
 ### 3. 프로덕션 빌드
 ```bash
@@ -74,23 +133,45 @@ npm run preview
 
 ```
 myVibe/
-├── src/
-│   ├── components/          # 재사용 가능한 컴포넌트
-│   │   └── FeedbackPanel.jsx
-│   ├── pages/              # 페이지 컴포넌트
+├── src/                          # 프론트엔드
+│   ├── components/               # 재사용 가능한 컴포넌트
+│   │   ├── FeedbackPanel.jsx
+│   │   └── LevelDebugPanel.jsx
+│   ├── pages/                    # 페이지 컴포넌트
 │   │   ├── HomePage.jsx
 │   │   ├── ChatPage.jsx
 │   │   ├── DashboardPage.jsx
-│   │   └── WeeklyReportPage.jsx
-│   ├── App.jsx             # 메인 앱 컴포넌트
-│   ├── main.jsx            # 앱 엔트리 포인트
-│   └── index.css           # 글로벌 스타일
-├── public/                 # 정적 파일
-├── index.html             # HTML 템플릿
-├── package.json           # 프로젝트 설정
-├── vite.config.js         # Vite 설정
-├── tailwind.config.js     # Tailwind 설정
-└── postcss.config.js      # PostCSS 설정
+│   │   ├── WeeklyReportPage.jsx
+│   │   ├── BookmarkPage.jsx
+│   │   └── ProfilePage.jsx
+│   ├── utils/                    # 유틸리티 함수
+│   │   ├── chatAPI.js           # 백엔드 API 연동 ⭐
+│   │   ├── levelSystem.js
+│   │   ├── bookmarkUtils.js
+│   │   └── stockAPI.js
+│   ├── lib/
+│   │   └── supabase.js          # Supabase 클라이언트
+│   ├── App.jsx
+│   ├── main.jsx
+│   └── index.css
+├── jujuclub/                     # 백엔드
+│   ├── services/
+│   │   ├── gateway/             # 메인 API 서버
+│   │   │   ├── src/
+│   │   │   │   ├── server.js   # Express 서버 ⭐
+│   │   │   │   ├── kis.js      # KIS API 연동
+│   │   │   │   ├── krx.js      # KRX API 연동
+│   │   │   │   ├── cnn.js      # Fear & Greed Index
+│   │   │   │   └── ...
+│   │   │   └── package.json
+│   │   └── ws-consumer/         # WebSocket 소비자
+│   └── shared/                   # 공유 모듈
+├── public/                       # 정적 파일
+├── package.json                  # 프론트엔드 의존성
+├── vite.config.js               # Vite 프록시 설정 ⭐
+├── INTEGRATION_GUIDE.md         # 통합 가이드 ⭐
+├── QUICK_START.md               # 빠른 시작 ⭐
+└── start-all.bat                # 원클릭 실행 스크립트 ⭐
 ```
 
 ## 페이지 라우팅
@@ -123,92 +204,82 @@ myVibe/
 }
 ```
 
-## LLM API 연동 가이드
+## 🤖 AI 챗봇 아키텍처
 
-현재는 Mock 데이터로 구현되어 있으며, 실제 LLM API와 연동하려면 다음 단계를 따르세요:
+### 백엔드 통합 완료 ✅
 
-### 1. 환경 변수 설정
+백엔드 API와 프론트엔드가 SSE (Server-Sent Events) 스트리밍 방식으로 연동되었습니다.
 
-`.env` 파일을 생성하고 API 키를 추가합니다:
-
-```bash
-VITE_LLM_API_KEY=your_api_key_here
-VITE_LLM_API_URL=https://api.openai.com/v1/chat/completions
+### API 흐름
+```
+사용자 질문
+    ↓
+React Frontend (ChatPage.jsx)
+    ↓
+chatAPI.js → /api/chat
+    ↓ (Vite 프록시)
+Express Backend (server.js)
+    ↓
+├─ Supabase (RAG 문서 검색)
+├─ KIS API (실시간 주가)
+├─ OpenAI (임베딩)
+└─ Groq LLM (Llama 3.1)
+    ↓
+SSE 스트리밍 응답
+    ↓
+실시간 UI 업데이트
 ```
 
-### 2. chatAPI.js 수정
+### 주요 기능
+- **실시간 스트리밍**: SSE를 통한 답변 실시간 표시
+- **하이브리드 검색**: Vector + FTS 검색으로 관련 문서 찾기
+- **실시간 주가**: KIS API 연동으로 실시간 시세 제공
+- **감정 분석**: 주가 변동에 따른 AI 페르소나 mood 변화
+- **뉴스 분석**: 삼성전자 관련 최신 뉴스 자동 필터링
+- **폴백 시스템**: 백엔드 오류 시 Mock 데이터로 자동 전환
 
-`src/utils/chatAPI.js` 파일의 `getAIResponse` 함수에서 주석 처리된 실제 API 호출 코드를 활성화하세요:
-
-```javascript
-export const getAIResponse = async (question, stockName = '삼성전자') => {
-  const response = await fetch(import.meta.env.VITE_LLM_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${import.meta.env.VITE_LLM_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: 'gpt-4',
-      messages: [
-        {
-          role: 'system',
-          content: `당신은 ${stockName}에 대한 전문적인 투자 상담 AI입니다. 
-                    사용자의 질문에 친절하고 정확하게 답변하되, 
-                    투자 리스크에 대한 경고를 잊지 마세요.`
-        },
-        {
-          role: 'user',
-          content: question
-        }
-      ]
-    })
-  })
-  
-  const data = await response.json()
-  
-  // Format the response to match our structure
-  return {
-    content: data.choices[0].message.content.split('\n\n'),
-    suggestions: generateSuggestions(question, stockName)
-  }
-}
-```
-
-### 3. 지원되는 LLM 제공자
-
-- **OpenAI GPT-4/GPT-3.5**
-- **Anthropic Claude**
-- **Google Gemini**
-- **Custom LLM API**
-
-### Mock 데이터 응답
-
-현재 구현된 Mock 응답 질문들:
+### Mock 데이터 (폴백 전용)
+백엔드 연결이 실패할 경우에만 사용되는 Mock 응답:
 - "키움증권 의견을 알려 줘"
 - "AI 버블론은 뭐였는데?"
-- "다른 증권사 의견도 궁금해"
-- "그럼 지금이 매수 타이밍일까?"
-- "목표주가가 현실적일까?"
-- "엔비디아 주가는 어떻게 됐어?"
-- "HBM 수주는 얼마나 늘었어?"
-- "실적 발표는 언제야?"
-- "배당은 얼마나 받을 수 있어?"
+- "최근 뉴스 요약해줘"
+- "경쟁사와 비교해줘"
+- 기타 등등
 
-더 많은 Mock 응답은 `src/utils/chatAPI.js`의 `mockResponses` 객체에서 확인할 수 있습니다.
+자세한 내용은 `src/utils/chatAPI.js` 참고.
 
-## 향후 개선 사항
+## 📚 추가 문서
 
-- ✅ LLM API 연동 준비 완료 (Mock 데이터로 구현됨)
-- 실제 LLM API 연결 (OpenAI/Claude/Gemini)
-- 사용자 인증 시스템
-- 실시간 주가 데이터 연동
-- 대화 히스토리 저장 및 관리
+- **[QUICK_START.md](./QUICK_START.md)** - 빠른 시작 가이드
+- **[INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md)** - 백엔드-프론트엔드 통합 가이드
+- **[KIS_API_SETUP.md](./KIS_API_SETUP.md)** - 한국투자증권 API 설정
+- **[SUPABASE_SETUP.md](./SUPABASE_SETUP.md)** - Supabase 설정
+- **[LEVEL_SYSTEM_GUIDE.md](./LEVEL_SYSTEM_GUIDE.md)** - 레벨 시스템 가이드
+- **[DEMO_GUIDE.md](./DEMO_GUIDE.md)** - 데모 시연 가이드
+
+## ✅ 구현 완료 사항
+
+- ✅ **백엔드-프론트엔드 통합** (SSE 스트리밍)
+- ✅ **실시간 AI 챗봇** (Groq Llama 3.1)
+- ✅ **RAG 시스템** (Supabase + OpenAI 임베딩)
+- ✅ **실시간 주가 연동** (KIS API)
+- ✅ **뉴스 분석** (자동 필터링 및 요약)
+- ✅ **감정 기반 페르소나** (Mood 시스템)
+- ✅ **북마크 시스템**
+- ✅ **레벨 시스템** (대화 기반 성장)
+- ✅ **주간 리포트**
+- ✅ **대시보드 차트**
+
+## 🚧 향후 개선 사항
+
+- 사용자 인증 시스템 (Supabase Auth)
+- 대화 히스토리 클라우드 동기화
 - 푸시 알림 기능
 - 소셜 공유 기능
 - 다크 모드 지원
 - 음성 입력 기능
 - 차트 이미지 생성 및 공유
+- WebSocket 실시간 시세 업데이트
 
 ## 라이선스
 
