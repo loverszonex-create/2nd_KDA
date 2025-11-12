@@ -626,6 +626,95 @@ app.get('/chat-test', async (req,res)=>{
   }, 400);
 });
 
+// ===== 간단한 OpenAI 챗봇 API (튜닝 없이) =====
+app.post('/simple-chat', async (req, res) => {
+  const { message, stream = true } = req.body;
+  
+  if (!message) {
+    return res.status(400).json({ ok: false, error: 'Message is required' });
+  }
+
+  console.log('[simple-chat] 질문:', message);
+
+  if (!stream) {
+    // 비스트리밍 모드
+    try {
+      const completion = await groq.chat.completions.create({
+        model: 'llama-3.1-8b-instant',
+        messages: [
+          {
+            role: 'system',
+            content: '키움 증권 측의 키우Me와 동일한 챗봇이야. 친절하고 전문적으로 답변해줘. 한국어로 답변해. 중요: 절대로 "전문가가 답변해드리겠습니다", "24시간 내 답변", "전문 상담", "전문가 의견" 같은 표현을 사용하지 마. 너는 AI 챗봇이며, 직접 답변을 제공하는 역할이야.'
+          },
+          {
+            role: 'user',
+            content: message
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 1000
+      });
+
+      const answer = completion.choices[0]?.message?.content || '죄송합니다, 답변을 생성할 수 없습니다.';
+      
+      res.status(200).json({
+        ok: true,
+        content: answer
+      });
+    } catch (error) {
+      console.error('[simple-chat] 오류:', error);
+      res.status(500).json({
+        ok: false,
+        error: String(error?.message || error)
+      });
+    }
+  } else {
+    // 스트리밍 모드
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.write(': ready\n\n');
+
+    try {
+      const stream = await groq.chat.completions.create({
+        model: 'llama-3.1-8b-instant',
+        messages: [
+          {
+            role: 'system',
+            content: '키움 증권 측의 키우Me와 동일한 챗봇이야. 친절하고 전문적으로 답변해줘. 한국어로 답변해. 중요: 절대로 "전문가가 답변해드리겠습니다", "24시간 내 답변", "전문 상담", "전문가 의견" 같은 표현을 사용하지 마. 너는 AI 챗봇이며, 직접 답변을 제공하는 역할이야.'
+          },
+          {
+            role: 'user',
+            content: message
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 1000,
+        stream: true
+      });
+
+      let fullText = '';
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content;
+        if (delta) {
+          fullText += delta;
+          res.write(`data: ${JSON.stringify({ delta })}\n\n`);
+        }
+      }
+
+      res.write(`data: ${JSON.stringify({ done: true, full: fullText })}\n\n`);
+      res.end();
+      
+      console.log('[simple-chat] ✅ 스트리밍 완료');
+    } catch (error) {
+      console.error('[simple-chat] 스트리밍 오류:', error);
+      res.write(`data: ${JSON.stringify({ error: String(error?.message || error), done: true })}\n\n`);
+      res.end();
+    }
+  }
+});
+
 app.get('/chat', async (req, res) => {
   const q = String(req.query.q || '');
   const ticker = String(req.query.ticker || '005930.KS');

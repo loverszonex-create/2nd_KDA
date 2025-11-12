@@ -123,6 +123,9 @@ function HomePage() {
       // 검색어를 가지고 "키우Me" 채팅방으로 이동하여 LLM과 대화
       navigate(`/chat/키우Me`, { state: { initialMessage: searchQuery } })
       setSearchQuery('') // 검색창 초기화
+    } else {
+      // 검색어가 없으면 그냥 키우Me 채팅방으로 이동
+      navigate(`/chat/키우Me`)
     }
   }
 

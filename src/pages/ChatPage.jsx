@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { ChevronLeft, MoreVertical, Info, Send, Signal, Wifi, Battery, BatteryCharging, Navigation, Bookmark, X } from 'lucide-react'
 import { getAIResponse, getFormattedTimestamp } from '../utils/chatAPI'
+import { getSimpleChatResponse } from '../utils/simpleChatAPI'
 import { incrementChatCount, isLevelUp, calculateProgress } from '../utils/levelSystem'
 import { addBookmark, removeBookmark, isBookmarked, findBookmarkByMessageId } from '../utils/bookmarkUtils'
 import { saveChatHistory, loadChatHistory, clearChatHistory } from '../utils/chatCache'
@@ -33,30 +34,6 @@ function ChatPage() {
       id: 1,
       type: 'date',
       content: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
-    },
-    {
-      id: 2,
-      type: 'notice',
-      content: '키우Me 서비스 이용 유의사항',
-      subtext: '키우Me의 답변은 생성형 AI를 활용한 답변으로 사실과 다를 수 있어요.'
-    },
-    {
-      id: 3,
-      type: 'bot',
-      sender: `${stockName} 키우Me`,
-      content: [
-        `안녕하세요! ${stockName}에 대해 궁금하신 점이 있으신가요?`,
-        '무엇이든 물어보세요. 주가 정보, 최근 뉴스, 투자 전략 등 다양한 정보를 제공해드립니다.'
-      ],
-      timestamp: new Date().toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' 기준'
-    },
-    {
-      id: 4,
-      type: 'suggestions',
-      suggestions: [
-        '최근 주가는 어때?',
-        '투자 의견을 알려줘'
-      ]
     }
   ])
   const messagesEndRef = useRef(null)
@@ -127,7 +104,66 @@ function ChatPage() {
           console.log(`[ChatPage] ✅ 캐시에서 ${cachedMessages.length}개 메시지 로드`)
           setMessages(cachedMessages)
         } else {
-          console.log(`[ChatPage] ⚠️ 캐시 없음, 기본 메시지 사용`)
+          console.log(`[ChatPage] ⚠️ 캐시 없음, 초기 메시지 설정`)
+          // 캐시 없으면 초기 메시지 설정
+          const timestamp = new Date().toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' 기준'
+          
+          if (stockName === '키우Me') {
+            setMessages([
+              {
+                id: 1,
+                type: 'date',
+                content: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
+              },
+              {
+                id: 2,
+                type: 'notice',
+                content: '키우Me 서비스 이용 유의사항',
+                subtext: '키우Me의 답변은 생성형 AI를 활용한 답변으로 사실과 다를 수 있어요.'
+              },
+              {
+                id: 3,
+                type: 'bot',
+                sender: '키우Me',
+                content: [
+                  '안녕하세요! 키우Me에 대해 궁금하신 점이 있으신가요?'
+                ],
+                timestamp: timestamp
+              }
+            ])
+          } else {
+            setMessages([
+              {
+                id: 1,
+                type: 'date',
+                content: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
+              },
+              {
+                id: 2,
+                type: 'notice',
+                content: '키우Me 서비스 이용 유의사항',
+                subtext: '키우Me의 답변은 생성형 AI를 활용한 답변으로 사실과 다를 수 있어요.'
+              },
+              {
+                id: 3,
+                type: 'bot',
+                sender: `${stockName} 키우Me`,
+                content: [
+                  `안녕하세요! ${stockName}에 대해 궁금하신 점이 있으신가요?`,
+                  '무엇이든 물어보세요. 주가 정보, 최근 뉴스, 투자 전략 등 다양한 정보를 제공해드립니다.'
+                ],
+                timestamp: timestamp
+              },
+              {
+                id: 4,
+                type: 'suggestions',
+                suggestions: [
+                  '최근 주가는 어때?',
+                  '투자 의견을 알려줘'
+                ]
+              }
+            ])
+          }
         }
       } catch (error) {
         console.error(`[ChatPage] ❌ 캐시 로드 실패:`, error)
@@ -336,33 +372,53 @@ function ChatPage() {
         // TODO: 레벨업 축하 모달이나 토스트 메시지 표시
       }
 
-      // Get AI response (mock for now, will be replaced with real LLM later)
+      // Get AI response
       try {
-        const response = await getAIResponse(userMessage, stockName, userNickname)
-        
-        // mood 업데이트
-        if (response.metadata && response.metadata.mood) {
-          setCurrentMood(response.metadata.mood)
+        // "키우Me" 종목은 간단한 챗봇 API 사용
+        if (stockName === '키우Me') {
+          const response = await getSimpleChatResponse(userMessage)
+          
+          setMessages(prev => {
+            const withoutSuggestions = prev.filter(msg => msg.type !== 'suggestions')
+            return [
+              ...withoutSuggestions,
+              {
+                id: Date.now() + 1,
+                type: 'bot',
+                sender: '키우Me',
+                content: [response.content],
+                timestamp: getFormattedTimestamp()
+              }
+            ]
+          })
+        } else {
+          // 다른 종목은 기존 튜닝된 API 사용
+          const response = await getAIResponse(userMessage, stockName, userNickname)
+          
+          // mood 업데이트
+          if (response.metadata && response.metadata.mood) {
+            setCurrentMood(response.metadata.mood)
+          }
+          
+          setMessages(prev => {
+            const withoutSuggestions = prev.filter(msg => msg.type !== 'suggestions')
+            return [
+              ...withoutSuggestions,
+              {
+                id: Date.now() + 1,
+                type: 'bot',
+                sender: `${stockName} 키우Me`,
+                content: response.content,
+                timestamp: getFormattedTimestamp()
+              },
+              {
+                id: Date.now() + 2,
+                type: 'suggestions',
+                suggestions: response.suggestions
+              }
+            ]
+          })
         }
-        
-        setMessages(prev => {
-          const withoutSuggestions = prev.filter(msg => msg.type !== 'suggestions')
-          return [
-            ...withoutSuggestions,
-            {
-              id: Date.now() + 1,
-              type: 'bot',
-              sender: `${stockName} 키우Me`,
-              content: response.content,
-              timestamp: getFormattedTimestamp()
-            },
-            {
-              id: Date.now() + 2,
-              type: 'suggestions',
-              suggestions: response.suggestions
-            }
-          ]
-        })
       } catch (error) {
         console.error('Error getting AI response:', error)
         // Fallback error message
@@ -378,6 +434,9 @@ function ChatPage() {
   }
 
   const handleSuggestionClick = async (suggestion) => {
+    // 키우Me는 제안 버블이 없으므로 종료
+    if (stockName === '키우Me') return
+    
     // Remove existing suggestions from messages
     const messagesWithoutSuggestions = messages.filter(msg => msg.type !== 'suggestions')
     
@@ -463,9 +522,11 @@ function ChatPage() {
             <ChevronLeft className="w-6 h-6 text-white" />
           </button>
           
-          {/* Center: 종목명 키우Me */}
+          {/* Center: 종목명 */}
           <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
-            <span className="text-white text-lg font-normal">{stockName} 키우Me</span>
+            <span className="text-white text-lg font-normal">
+              {stockName === '키우Me' ? '키우Me' : `${stockName} 키우Me`}
+            </span>
             <div className="px-2 py-0.5 bg-blue-950/40 rounded-full flex items-center justify-center">
               <span className="text-white text-xs font-normal leading-none">Beta</span>
             </div>
@@ -481,17 +542,19 @@ function ChatPage() {
           </button>
         </div>
 
-        {/* 하단 줄: 오늘의 온도 */}
-        <div className="flex justify-center">
-          <div className="relative inline-flex items-center gap-1 px-2 py-1 rounded-full overflow-hidden" style={{ 
-            zIndex: 10, 
-            background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.15))',
-            backdropFilter: 'blur(10px)'
-          }}>
-            <span className="text-white text-xs font">오늘의 온도 : </span>
-            <span className="text-xs">{getMoodEmoji(currentMood)}⚪</span>
+        {/* 하단 줄: 오늘의 온도 (키우Me는 제외) */}
+        {stockName !== '키우Me' && (
+          <div className="flex justify-center">
+            <div className="relative inline-flex items-center gap-1 px-2 py-1 rounded-full overflow-hidden" style={{ 
+              zIndex: 10, 
+              background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.15))',
+              backdropFilter: 'blur(10px)'
+            }}>
+              <span className="text-white text-xs font">오늘의 온도 : </span>
+              <span className="text-xs">{getMoodEmoji(currentMood)}⚪</span>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Messages Container */}
@@ -543,10 +606,12 @@ function ChatPage() {
                   <div className="w-7 h-7 rounded-full overflow-hidden flex items-center justify-center border border-stone-300 bg-white">
                     <StockLogo stockName={stockName} size="xs" />
                   </div>
-                  {/* 닉네임 + Mood 이모지 */}
+                  {/* 닉네임 + Mood 이모지 (키우Me는 제외) */}
                   <div className="flex items-center gap-1">
                     <span className="text-black text-base">{msg.sender}</span>
-                    <span className="text-sm">{getMoodEmoji(currentMood)}</span>
+                    {stockName !== '키우Me' && (
+                      <span className="text-sm">{getMoodEmoji(currentMood)}</span>
+                    )}
                   </div>
                 </div>
                 <div className="max-w-[340px] px-5 py-4 bg-color-white-solid rounded-tl-lg rounded-tr-2xl rounded-bl-2xl rounded-br-2xl shadow-md">
@@ -579,7 +644,7 @@ function ChatPage() {
 
           if (msg.type === 'suggestions') {
             return (
-              <div key={msg.id} className="w-full flex flex-col gap-3">
+              <div key={msg.id} className="w-full flex flex-col gap-2">
                 {msg.suggestions.slice(0, 2).map((suggestion, idx) => {
                   // 한 문장만 추출 (첫 번째 마침표, 물음표, 느낌표까지)
                   const firstSentence = suggestion.split(/[.?!]/)[0].trim() + (suggestion.match(/[.?!]/) ? suggestion.match(/[.?!]/)[0] : '')
@@ -588,10 +653,10 @@ function ChatPage() {
                     <button
                       key={idx}
                       onClick={() => handleSuggestionClick(suggestion)}
-                      className="w-full pl-5 pr-20 py-3.5 bg-color-white-solid rounded-full text-left hover:bg-gray-50 transition-colors border"
+                      className="w-full px-4 py-2 bg-color-white-solid rounded-full text-left hover:bg-gray-50 transition-colors border"
                       style={{ borderColor: '#C8CCFF' }}
                     >
-                      <span className="text-base" style={{ color: '#717BE4' }}>{firstSentence}</span>
+                      <span className="text-sm" style={{ color: '#717BE4' }}>{firstSentence}</span>
                     </button>
                   )
                 })}
