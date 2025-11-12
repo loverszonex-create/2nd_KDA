@@ -6,7 +6,7 @@ import { getTimeAgo, getMockLastMessageTime } from '../utils/timeUtils'
 import { getMockStockPrice, getMultipleRealtimeStockPrices, STOCK_CODE_MAP } from '../utils/stockAPI'
 import { getChatCount, calculateProgress } from '../utils/levelSystem'
 import { removeBookmark } from '../utils/bookmarkUtils'
-import { getCacheStats } from '../utils/chatCache'
+import { getCacheStats, clearChatHistory } from '../utils/chatCache'
 
 function HomePage() {
   const navigate = useNavigate()
@@ -291,6 +291,58 @@ function HomePage() {
     navigate(`/chat/${bookmark.stockName}`, { state: { scrollToMessage: bookmark.messageId } })
   }
 
+  // 대화 기록 삭제 핸들러
+  const handleClearChatHistory = (e, stockName) => {
+    e.stopPropagation() // 클릭 이벤트 전파 방지
+    const confirmed = window.confirm(`${stockName}와의 대화 기록을 삭제하시겠습니까?`)
+    if (confirmed) {
+      console.log(`[HomePage] 🗑️ 대화 기록 삭제: ${stockName}`)
+      clearChatHistory(stockName)
+      
+      // 대화 기록 목록 새로고침
+      if (activeTab === 'history') {
+        const cacheStats = getCacheStats()
+        const allStockTemplates = {
+          '삼성전자': { id: 1, category: '', badge: '국내', logo: 'samsung' },
+          'SK하이닉스': { id: 2, category: '#반도체', badge: '국내', logo: 'sk' },
+          '삼성SDI': { id: 3, category: '#2차전지', badge: '국내', logo: 'samsungsdi' },
+          '현대차': { id: 4, category: '#자동차', badge: '국내', logo: 'hyundai' },
+          'LG에너지솔루션': { id: 5, category: '#2차전지', badge: '국내', logo: 'lg' },
+          '기아': { id: 6, category: '#자동차', badge: '국내', logo: 'kia' },
+          '에코프로': { id: 7, category: '#2차전지', badge: '국내', logo: 'battery' }
+        }
+        
+        const historyStocks = []
+        cacheStats.chats.forEach((chat, index) => {
+          const template = allStockTemplates[chat.stockName]
+          if (template) {
+            historyStocks.push({
+              ...template,
+              id: index + 1,
+              name: chat.stockName,
+              lastMessage: `${chat.messageCount}개의 메시지`,
+              lastMessageTime: chat.timestamp,
+              changeRate: getChangeRate(chat.stockName)
+            })
+          }
+        })
+        
+        historyStocks.push({
+          id: 999,
+          name: '금융주 팀톡',
+          category: '',
+          lastMessage: '@미래에셋증권 @하나금융지주',
+          lastMessageTime: getMockLastMessageTime(1500),
+          badge: '국내',
+          changeRate: getChangeRate('금융주 팀톡'),
+          logo: 'finance'
+        })
+        
+        setChatHistoryStocks(historyStocks)
+      }
+    }
+  }
+
   const displayedStocks = activeTab === 'home' ? homeStocks : (activeTab === 'history' ? chatHistoryStocks : [])
 
   return (
@@ -547,8 +599,19 @@ function HomePage() {
             <div
               key={chat.id}
               onClick={() => navigate(`/chat/${chat.name}`)}
-              className="w-full bg-white rounded-[10px] shadow-[0px_4px_4px_0px_rgba(0,0,0,0.09)] relative cursor-pointer hover:shadow-lg transition-all"
+              className="w-full bg-white rounded-[10px] shadow-[0px_4px_4px_0px_rgba(0,0,0,0.09)] relative cursor-pointer hover:shadow-lg transition-all group"
             >
+              {/* 삭제 버튼 - 대화 기록 탭에서만 표시 (금융주 팀톡 제외) */}
+              {activeTab === 'history' && chat.name !== '금융주 팀톡' && (
+                <button
+                  onClick={(e) => handleClearChatHistory(e, chat.name)}
+                  className="absolute top-2 right-2 w-7 h-7 rounded-full bg-gray-100 hover:bg-red-100 flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100 z-10"
+                  title="대화 기록 삭제"
+                >
+                  <X className="w-4 h-4 text-gray-600 hover:text-red-600" />
+                </button>
+              )}
+              
               {/* 로고 */}
               <div className="absolute w-14 h-14 left-[18px] top-[15px] bg-white rounded-full border border-stone-500 flex items-center justify-center overflow-hidden">
                 {chat.logo === 'samsung' && (

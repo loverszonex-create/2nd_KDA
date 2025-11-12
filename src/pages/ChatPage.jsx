@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { ChevronLeft, MoreVertical, Info, Send, Signal, Wifi, Battery, BatteryCharging, Navigation, Bookmark } from 'lucide-react'
+import { ChevronLeft, MoreVertical, Info, Send, Signal, Wifi, Battery, BatteryCharging, Navigation, Bookmark, X } from 'lucide-react'
 import { getAIResponse, getFormattedTimestamp } from '../utils/chatAPI'
 import { incrementChatCount, isLevelUp, calculateProgress } from '../utils/levelSystem'
 import { addBookmark, removeBookmark, isBookmarked, findBookmarkByMessageId } from '../utils/bookmarkUtils'
-import { saveChatHistory, loadChatHistory } from '../utils/chatCache'
+import { saveChatHistory, loadChatHistory, clearChatHistory } from '../utils/chatCache'
 import StockLogo from '../components/StockLogo'
 
 // mood에서 이모지만 추출하는 함수
@@ -211,6 +211,18 @@ function ChatPage() {
     }
   }, [location.state, messages, cacheLoaded])
   
+  // 대화 기록 삭제 핸들러
+  const handleClearChat = () => {
+    const confirmed = window.confirm(`${stockName}와의 대화 기록을 모두 삭제하시겠습니까?`)
+    if (confirmed) {
+      console.log(`[ChatPage] 🗑️ 대화 기록 삭제: ${stockName}`)
+      clearChatHistory(stockName)
+      
+      // HomePage로 이동
+      navigate('/')
+    }
+  }
+
   // 북마크 토글 핸들러
   const handleBookmarkToggle = (msg) => {
     const messageId = msg.id.toString()
@@ -459,9 +471,13 @@ function ChatPage() {
             </div>
           </div>
           
-          {/* Right: More Button */}
-          <button>
-            <MoreVertical className="w-6 h-6 text-white" />
+          {/* Right: Clear Chat Button */}
+          <button 
+            onClick={handleClearChat}
+            className="hover:bg-white/10 rounded-full p-1 transition-colors"
+            title="대화 기록 삭제"
+          >
+            <X className="w-6 h-6 text-white" />
           </button>
         </div>
 
