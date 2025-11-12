@@ -4,6 +4,7 @@ import { ChevronLeft, MoreVertical, Info, Send, Signal, Wifi, Battery, BatteryCh
 import { getAIResponse, getFormattedTimestamp } from '../utils/chatAPI'
 import { incrementChatCount, isLevelUp, calculateProgress } from '../utils/levelSystem'
 import { addBookmark, removeBookmark, isBookmarked, findBookmarkByMessageId } from '../utils/bookmarkUtils'
+import { saveChatHistory, loadChatHistory } from '../utils/chatCache'
 import StockLogo from '../components/StockLogo'
 
 // mood에서 이모지만 추출하는 함수
@@ -108,6 +109,52 @@ function ChatPage() {
     }
   }, [])
 
+  // 캐시 로드 상태 추가
+  const [cacheLoaded, setCacheLoaded] = useState(false)
+
+  // 채팅 히스토리 로드 (초기화) - 최우선 실행
+  useEffect(() => {
+    let isMounted = true
+    
+    async function loadCache() {
+      console.log(`[ChatPage] 🔄 캐시 로드 시작: ${stockName}`)
+      try {
+        const cachedMessages = await loadChatHistory(stockName)
+        
+        if (!isMounted) return // 컴포넌트가 언마운트되었으면 중단
+        
+        if (cachedMessages && cachedMessages.length > 0) {
+          console.log(`[ChatPage] ✅ 캐시에서 ${cachedMessages.length}개 메시지 로드`)
+          setMessages(cachedMessages)
+        } else {
+          console.log(`[ChatPage] ⚠️ 캐시 없음, 기본 메시지 사용`)
+        }
+      } catch (error) {
+        console.error(`[ChatPage] ❌ 캐시 로드 실패:`, error)
+      } finally {
+        if (isMounted) {
+          // 캐시 로드 완료 표시 (성공/실패 무관)
+          setCacheLoaded(true)
+        }
+      }
+    }
+    
+    loadCache()
+    
+    return () => {
+      isMounted = false
+    }
+  }, [stockName])
+
+  // 채팅 히스토리 자동 저장 (메시지 변경 시)
+  useEffect(() => {
+    // 캐시가 로드된 후에만 저장 (무한 루프 방지)
+    if (cacheLoaded && messages.length > 1) {
+      console.log(`[ChatPage] 💾 캐시 저장: ${messages.length}개 메시지`)
+      saveChatHistory(stockName, messages)
+    }
+  }, [messages, stockName, cacheLoaded])
+
   // HomePage에서 전달된 초기 메시지 자동 전송
   useEffect(() => {
     const initialMessage = location.state?.initialMessage
@@ -131,6 +178,38 @@ function ChatPage() {
       .map(msg => msg.id.toString())
     setBookmarkedMessages(new Set(bookmarks))
   }, [messages])
+
+  // 북마크에서 메시지로 이동 (스크롤) - 캐시 로드 후 실행
+  useEffect(() => {
+    const scrollToMessageId = location.state?.scrollToMessage
+    
+    // 캐시가 로드되고 메시지가 있을 때만 스크롤
+    if (scrollToMessageId && cacheLoaded && messages.length > 0) {
+      console.log(`[ChatPage] 🎯 북마크 메시지로 스크롤 시도: ${scrollToMessageId}`)
+      
+      // 메시지가 렌더링될 때까지 충분한 딜레이
+      const timer = setTimeout(() => {
+        const element = document.getElementById(`message-${scrollToMessageId}`)
+        if (element) {
+          console.log(`[ChatPage] ✅ 북마크 메시지 발견, 스크롤 실행`)
+          element.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'center'
+          })
+          // 강조 효과 추가
+          element.style.transition = 'background-color 0.3s'
+          element.style.backgroundColor = 'rgba(96, 108, 242, 0.15)'
+          setTimeout(() => {
+            element.style.backgroundColor = 'transparent'
+          }, 2000)
+        } else {
+          console.warn(`[ChatPage] ⚠️ 북마크 메시지를 찾을 수 없음: ${scrollToMessageId}`)
+        }
+      }, 800) // 딜레이 증가
+      
+      return () => clearTimeout(timer)
+    }
+  }, [location.state, messages, cacheLoaded])
   
   // 북마크 토글 핸들러
   const handleBookmarkToggle = (msg) => {
@@ -485,16 +564,21 @@ function ChatPage() {
           if (msg.type === 'suggestions') {
             return (
               <div key={msg.id} className="w-full flex flex-col gap-3">
-                {msg.suggestions.map((suggestion, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleSuggestionClick(suggestion)}
-                    className="w-full pl-5 pr-20 py-3.5 bg-color-white-solid rounded-full text-left hover:bg-gray-50 transition-colors border"
-                    style={{ borderColor: '#C8CCFF' }}
-                  >
-                    <span className="text-base" style={{ color: '#717BE4' }}>{suggestion}</span>
-                  </button>
-                ))}
+                {msg.suggestions.slice(0, 2).map((suggestion, idx) => {
+                  // 한 문장만 추출 (첫 번째 마침표, 물음표, 느낌표까지)
+                  const firstSentence = suggestion.split(/[.?!]/)[0].trim() + (suggestion.match(/[.?!]/) ? suggestion.match(/[.?!]/)[0] : '')
+                  
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => handleSuggestionClick(suggestion)}
+                      className="w-full pl-5 pr-20 py-3.5 bg-color-white-solid rounded-full text-left hover:bg-gray-50 transition-colors border"
+                      style={{ borderColor: '#C8CCFF' }}
+                    >
+                      <span className="text-base" style={{ color: '#717BE4' }}>{firstSentence}</span>
+                    </button>
+                  )
+                })}
               </div>
             )
           }

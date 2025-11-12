@@ -6,15 +6,17 @@ import { getTimeAgo, getMockLastMessageTime } from '../utils/timeUtils'
 import { getMockStockPrice, getMultipleRealtimeStockPrices, STOCK_CODE_MAP } from '../utils/stockAPI'
 import { getChatCount, calculateProgress } from '../utils/levelSystem'
 import { removeBookmark } from '../utils/bookmarkUtils'
+import { getCacheStats } from '../utils/chatCache'
 
 function HomePage() {
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState('home') // 'home', 'all', or 'bookmark'
+  const [activeTab, setActiveTab] = useState('home') // 'home', 'history', or 'bookmark'
   const [searchQuery, setSearchQuery] = useState('')
   const [currentTime, setCurrentTime] = useState(new Date())
   const [isCharging, setIsCharging] = useState(false)
   const [timeUpdateTrigger, setTimeUpdateTrigger] = useState(0)
   const [stockPrices, setStockPrices] = useState({})
+  const [chatHistoryStocks, setChatHistoryStocks] = useState([])
   
   // 레벨 시스템 상태
   const [levelInfo, setLevelInfo] = useState({
@@ -124,15 +126,16 @@ function HomePage() {
     }
   }
 
-      // 홈 탭 - 전체 8개 종목
-      const getChangeRate = (name) => {
-        const price = stockPrices[name]
-        if (!price || price.changeRate === undefined) return 'N/A'
-        const rate = price.changeRate
-        return rate >= 0 ? `+${rate.toFixed(2)}%` : `${rate.toFixed(2)}%`
-      }
+  // 등락률 계산 함수
+  const getChangeRate = (name) => {
+    const price = stockPrices[name]
+    if (!price || price.changeRate === undefined) return 'N/A'
+    const rate = price.changeRate
+    return rate >= 0 ? `+${rate.toFixed(2)}%` : `${rate.toFixed(2)}%`
+  }
 
-      const homeStocks = [
+  // 홈 탭 - 금융주 팀톡 제외한 7개 종목
+  const homeStocks = [
     {
       id: 1,
       name: '삼성전자',
@@ -202,52 +205,59 @@ function HomePage() {
       badge: '국내',
       changeRate: getChangeRate('SK하이닉스'),
       logo: 'sk'
-    },
-    {
-      id: 8,
-      name: '금융주 팀톡',
-      category: '',
-      lastMessage: '@미래에셋증권 @하나금융지주',
-      lastMessageTime: getMockLastMessageTime(1500), // 25시간 전
-      badge: '국내',
-      changeRate: getChangeRate('금융주 팀톡'),
-      logo: 'finance'
     }
   ]
 
-  // 전체보기 탭 - 3개 종목
-  const allStocks = [
-    {
-      id: 1,
-      name: '삼성전자',
-      category: '',
-      lastMessage: '초심으로 돌아가자 .. 10만전자 될까?',
-      lastMessageTime: getMockLastMessageTime(0.5), // 30초 전
-      badge: '국내',
-      changeRate: getChangeRate('삼성전자'),
-      logo: 'samsung'
-    },
-    {
-      id: 7,
-      name: 'SK하이닉스',
-      category: '#반도체',
-      lastMessage: 'HBM 시장 선두주자',
-      lastMessageTime: getMockLastMessageTime(1440), // 어제
-      badge: '국내',
-      changeRate: getChangeRate('SK하이닉스'),
-      logo: 'sk'
-    },
-    {
-      id: 8,
-      name: '금융주 팀톡',
-      category: '',
-      lastMessage: '@미래에셋증권 @하나금융지주',
-      lastMessageTime: getMockLastMessageTime(1500), // 25시간 전
-      badge: '국내',
-      changeRate: getChangeRate('금융주 팀톡'),
-      logo: 'finance'
+  // 대화 기록 탭 - 대화 이력이 있는 종목만 표시
+  useEffect(() => {
+    if (activeTab === 'history') {
+      const cacheStats = getCacheStats()
+      console.log('[HomePage] 대화 기록 통계:', cacheStats)
+      
+      // 모든 종목 템플릿
+      const allStockTemplates = {
+        '삼성전자': { id: 1, category: '', badge: '국내', logo: 'samsung' },
+        'SK하이닉스': { id: 2, category: '#반도체', badge: '국내', logo: 'sk' },
+        '삼성SDI': { id: 3, category: '#2차전지', badge: '국내', logo: 'samsungsdi' },
+        '현대차': { id: 4, category: '#자동차', badge: '국내', logo: 'hyundai' },
+        'LG에너지솔루션': { id: 5, category: '#2차전지', badge: '국내', logo: 'lg' },
+        '기아': { id: 6, category: '#자동차', badge: '국내', logo: 'kia' },
+        '에코프로': { id: 7, category: '#2차전지', badge: '국내', logo: 'battery' }
+      }
+      
+      const historyStocks = []
+      
+      // 대화 이력이 있는 종목만 추가
+      cacheStats.chats.forEach((chat, index) => {
+        const template = allStockTemplates[chat.stockName]
+        if (template) {
+          historyStocks.push({
+            ...template,
+            id: index + 1,
+            name: chat.stockName,
+            lastMessage: `${chat.messageCount}개의 메시지`,
+            lastMessageTime: chat.timestamp,
+            changeRate: getChangeRate(chat.stockName)
+          })
+        }
+      })
+      
+      // 금융주 팀톡은 항상 맨 뒤에 추가
+      historyStocks.push({
+        id: 999,
+        name: '금융주 팀톡',
+        category: '',
+        lastMessage: '@미래에셋증권 @하나금융지주',
+        lastMessageTime: getMockLastMessageTime(1500),
+        badge: '국내',
+        changeRate: getChangeRate('금융주 팀톡'),
+        logo: 'finance'
+      })
+      
+      setChatHistoryStocks(historyStocks)
+      console.log('[HomePage] 대화 기록 종목:', historyStocks.map(s => s.name))
     }
-  ]
+  }, [activeTab, stockPrices, timeUpdateTrigger])
 
   // 북마크 데이터 로드
   const [bookmarks, setBookmarks] = useState([])
@@ -281,7 +291,7 @@ function HomePage() {
     navigate(`/chat/${bookmark.stockName}`, { state: { scrollToMessage: bookmark.messageId } })
   }
 
-  const displayedStocks = activeTab === 'home' ? homeStocks : (activeTab === 'all' ? allStocks : [])
+  const displayedStocks = activeTab === 'home' ? homeStocks : (activeTab === 'history' ? chatHistoryStocks : [])
 
   return (
     <div className="w-full min-h-screen relative bg-white overflow-y-auto">
@@ -422,16 +432,16 @@ function HomePage() {
           )}
         </button>
         <button 
-          onClick={() => setActiveTab('all')}
+          onClick={() => setActiveTab('history')}
           className={`h-full flex items-center justify-center text-base font-semibold relative ${
-            activeTab === 'all' 
+            activeTab === 'history' 
               ? 'text-black' 
               : 'text-stone-500'
           }`}
           style={{ marginRight: '3ch' }}
         >
-          <span>전체보기</span>
-          {activeTab === 'all' && (
+          <span>대화 기록</span>
+          {activeTab === 'history' && (
             <div className="absolute bottom-0 left-1/2 -translate-x-1/2 bg-black" style={{ width: '130%', height: '2.4px' }}></div>
           )}
         </button>
@@ -453,8 +463,8 @@ function HomePage() {
       {/* Content */}
       <div className="w-full bg-gray-50">
         <div className="px-5 py-6 pb-6">
-          {/* 종목 대화 리스트 제목 - 전체보기 탭에만 표시 */}
-          {activeTab === 'all' && (
+          {/* 종목 대화 리스트 제목 - 대화 기록 탭에만 표시 */}
+          {activeTab === 'history' && (
             <h2 className="text-black text-xl font-normal mb-4">종목 대화 리스트</h2>
           )}
 

@@ -293,7 +293,11 @@ export async function getAIResponse(userMessage, stockName, userNickname = '회�
     const suggestMatch = fullText.match(/\[SUGGEST\](.*?)\[\/SUGGEST\]/s)
     if (suggestMatch) {
       const suggestText = suggestMatch[1].trim()
-      suggestions = suggestText.split('|').map(s => s.trim()).filter(s => s.length > 0)
+      suggestions = suggestText
+        .split('|')
+        .map(s => s.trim())
+        .filter(s => s.length > 0)
+        .slice(0, 2) // 최대 2개로 제한
       // 제안 부분 제거
       cleanText = fullText.replace(/\[SUGGEST\].*?\[\/SUGGEST\]/s, '').trim()
     }

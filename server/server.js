@@ -407,8 +407,44 @@ function classifyNews(items = [], keywords = NEWS_KEYWORDS) {
   return { primary, secondary, all: normalized };
 }
 
+// ===== Chat History Cache =====
+const CHAT_HISTORY_TTL = 60 * 60 * 24 * 7; // 7일
+
+async function saveChatSession(sessionId, ticker, messages) {
+  try {
+    const key = `chat:session:${sessionId}:${ticker}`;
+    const data = {
+      sessionId,
+      ticker,
+      messages,
+      updatedAt: new Date().toISOString()
+    };
+    await redis.set(key, data, { ex: CHAT_HISTORY_TTL });
+    console.log(`[Cache] 채팅 세션 저장: ${sessionId}, ${ticker}, ${messages.length}개 메시지`);
+    return true;
+  } catch (error) {
+    console.error('[Cache] 채팅 세션 저장 실패:', error);
+    return false;
+  }
+}
+
+async function loadChatSession(sessionId, ticker) {
+  try {
+    const key = `chat:session:${sessionId}:${ticker}`;
+    const data = await redis.get(key);
+    if (data) {
+      console.log(`[Cache] 채팅 세션 로드: ${sessionId}, ${ticker}, ${data.messages?.length || 0}개 메시지`);
+      return data.messages || [];
+    }
+    return null;
+  } catch (error) {
+    console.error('[Cache] 채팅 세션 로드 실패:', error);
+    return null;
+  }
+}
+
 // ===== Routes =====
-app.get('/', (req,res)=> res.status(200).send('OK: /health, /diag, /diag-redis, /chat, /chat-test'));
+app.get('/', (req,res)=> res.status(200).send('OK: /health, /diag, /diag-redis, /chat, /chat-test, /chat/history'));
 
 app.get('/health', (req,res)=> res.status(200).json({ ok:true, time:new Date().toISOString() }));
 
@@ -739,8 +775,7 @@ app.get('/chat', async (req, res) => {
       '제공된 콘텐츠에 없는 정보는 추측하지 말고 모른다고 말해.',
       '영어 표현이나 전문 용어는 자연스러운 한국어로 풀어줘.',
       '출처, URL, "Source" 같은 표현은 쓰지 말고, 괄호 속 출처 표기도 하지 마.',
-      '중복 설명을 피하고 핵심만 정리한 뒤 차분히 마무리해.',
-      '답변 마지막에 반드시 다음 형식으로 후속 질문 2개를 제안해: [SUGGEST]질문1|질문2[/SUGGEST]'
+      '중복 설명을 피하고 핵심만 정리한 뒤 차분히 마무리해.'
     ];
 
     if (price) {
@@ -916,6 +951,67 @@ app.get('/stock/:code', async (req, res) => {
     res.status(500).json({
       ok: false,
       error: String(error?.message || error)
+    });
+  }
+});
+
+// ===== 채팅 히스토리 저장 API =====
+app.post('/chat/history', async (req, res) => {
+  try {
+    const { sessionId, ticker, messages } = req.body;
+    
+    if (!sessionId || !ticker || !messages) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Missing required fields: sessionId, ticker, messages'
+      });
+    }
+    
+    const success = await saveChatSession(sessionId, ticker, messages);
+    
+    res.status(200).json({
+      ok: success,
+      saved: messages.length,
+      sessionId,
+      ticker
+    });
+  } catch (error) {
+    console.error('[POST /chat/history]', error);
+    res.status(500).json({
+      ok: false,
+      error: String(error?.message || error)
+    });
+  }
+});
+
+// ===== 채팅 히스토리 로드 API =====
+app.get('/chat/history/:sessionId/:ticker', async (req, res) => {
+  try {
+    const { sessionId, ticker } = req.params;
+    
+    const messages = await loadChatSession(sessionId, ticker);
+    
+    if (!messages) {
+      return res.status(404).json({
+        ok: false,
+        error: 'No chat history found',
+        messages: []
+      });
+    }
+    
+    res.status(200).json({
+      ok: true,
+      messages,
+      sessionId,
+      ticker,
+      count: messages.length
+    });
+  } catch (error) {
+    console.error('[GET /chat/history]', error);
+    res.status(500).json({
+      ok: false,
+      error: String(error?.message || error),
+      messages: []
     });
   }
 });
