@@ -5,7 +5,11 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 const STOCK_NAME_TO_TICKER = {
   '삼성전자': '005930.KS',
   'SK하이닉스': '000660.KS',
-  '삼성SDI': '006400.KS'
+  '삼성SDI': '006400.KS',
+  '기아': '000270.KS',
+  '에코프로': '086520.KS',
+  '현대차': '005380.KS',
+  'LG에너지솔루션':'373220.KS',
 }
 
 // Mock AI responses - 백엔드 연결 실패 시 폴백용

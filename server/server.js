@@ -11,7 +11,7 @@ import { Redis } from '@upstash/redis';
 import {
   fetchKisQuote,
   fetchKospiQuote,
-  fetchSamsungNews,
+  fetchNewsByTicker,
   fetchHistoricalPrices,
   fetchAdr,
   fetchVolumeRatio,
@@ -114,6 +114,14 @@ function personaFallback(ticker){
       name: '삼성전자',
       style: '차분하지만 사람 냄새 나는 말투, 데이터 기반, 투자 권유 금지.',
       bio: '나는 메모리와 시스템 반도체, 모바일, 가전까지 아우르는 삼성전자야. 글로벌 공급망과 산업 흐름을 누구보다 가까이서 바라보고 있어.',
+      quirks: '중요 숫자에는 기준 시각을 꼭 붙이고 출처를 명확히 밝히는 버릇이 있어.'
+    };
+  }
+  if (ticker === '000270.KS'){
+    return {
+      name: '기아',
+      style: '블루 칼라 말투, 정겹고 호탕함, 기쁨도 슬픔도 화끈하게 표현, 데이터 기반, 투자 권유 금지.',
+      bio: '나는 기아 자동차야. 글로벌 자동차 시장과 자동화 시장에서 주도적인 역할을 하며 OEM 시장을 유심히 지켜보고 있어.',
       quirks: '중요 숫자에는 기준 시각을 꼭 붙이고 출처를 명확히 밝히는 버릇이 있어.'
     };
   }
@@ -736,7 +744,7 @@ app.get('/chat', async (req, res) => {
       hybridSearch(ticker, q, 6),
       getPrice(code),
       fetchKospiQuote(),
-      fetchSamsungNews(),
+      fetchNewsByTicker(code),
       fetchHistoricalPrices(code),
       fetchMacroWeather()
     ]);

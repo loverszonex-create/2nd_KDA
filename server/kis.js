@@ -156,8 +156,8 @@ export async function fetchKospiQuote() {
   }
 }
 
-export async function fetchSamsungNews() {
-  const cacheKey = 'news:005930';
+export async function fetchNewsByTicker(ticker) {
+  const cacheKey = `news:${ticker}`;
   let cached;
   try {
     cached = await redis.get(cacheKey);
@@ -181,7 +181,7 @@ export async function fetchSamsungNews() {
   }
 
   try {
-    const news = await getNews({ ticker: '005930' });
+    const news = await getNews({ ticker });
     console.log('[kis] news api length', Array.isArray(news) ? news.length : 'not-array');
     if (Array.isArray(news) && news.length) {
       await redis.set(cacheKey, { items: news, ts: Date.now() }, { ex: NEWS_CACHE_TTL });
@@ -189,7 +189,7 @@ export async function fetchSamsungNews() {
     }
     return cached?.items || [];
   } catch (err) {
-    console.error('[gateway] fetchSamsungNews error', err?.message || err);
+    console.error('[gateway] fetchNewsByTicker error', err?.message || err);
     return cached?.items || [];
   }
 }
