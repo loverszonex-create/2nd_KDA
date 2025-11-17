@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { ChevronLeft, MoreVertical, Info, Send, Signal, Wifi, Battery, BatteryCharging, Navigation, Bookmark, X } from 'lucide-react'
-import { getAIResponse, getFormattedTimestamp } from '../utils/chatAPI'
+import { sendChatMessage, getFormattedTimestamp } from '../utils/chatAPI'
 import { getSimpleChatResponse } from '../utils/simpleChatAPI'
 import { incrementChatCount, isLevelUp, calculateProgress } from '../utils/levelSystem'
 import { addBookmark, removeBookmark, isBookmarked, findBookmarkByMessageId } from '../utils/bookmarkUtils'
 import { saveChatHistory, loadChatHistory, clearChatHistory } from '../utils/chatCache'
+import { lookupStock } from '../utils/stockAPI'
 import StockLogo from '../components/StockLogo'
 
 // mood에서 이모지만 추출하는 함수
@@ -25,6 +26,7 @@ function ChatPage() {
   const { stockName } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
+  const locationTicker = location.state?.ticker
   const [message, setMessage] = useState('')
   const [currentTime, setCurrentTime] = useState(new Date())
   const [isCharging, setIsCharging] = useState(false)
@@ -39,25 +41,20 @@ function ChatPage() {
   const messagesEndRef = useRef(null)
   const [bookmarkedMessages, setBookmarkedMessages] = useState(new Set())
   const [currentMood, setCurrentMood] = useState('😐 보통')
-  
-  // 종목명 -> 티커 매핑
-  const STOCK_NAME_TO_TICKER = {
-    '삼성전자': '005930.KS',
-    'SK하이닉스': '000660.KS',
-    '삼성SDI': '006400.KS',
-    '현대차': '005380.KS',
-    'LG에너지솔루션': '373220.KS',
-    '기아': '000270.KS',
-    '에코프로': '086520.KS'
-  }
+  const [stockTicker, setStockTicker] = useState(() => {
+    if (stockName === '키우Me') return null
+    return locationTicker || null
+  })
   
   // 초기 mood 로드
   useEffect(() => {
+    if (stockName === '키우Me') return
+
     const loadMood = async () => {
+      const resolvedTicker = stockTicker || '005930.KS'
       try {
-        const ticker = STOCK_NAME_TO_TICKER[stockName] || '005930.KS'
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
-        const response = await fetch(`${API_BASE_URL}/mood/${ticker}`)
+        const response = await fetch(`${API_BASE_URL}/mood/${resolvedTicker}`)
         
         if (response.ok) {
           const data = await response.json()
@@ -76,8 +73,45 @@ function ChatPage() {
     const moodTimer = setInterval(loadMood, 5 * 60 * 1000)
     
     return () => clearInterval(moodTimer)
-  }, [stockName])
+  }, [stockName, stockTicker])
   
+  // 종목 티커 로드 (검색/커스텀 종목 대응)
+  useEffect(() => {
+    let isMounted = true
+    if (stockName === '키우Me') {
+      setStockTicker(null)
+      return () => {
+        isMounted = false
+      }
+    }
+
+    if (locationTicker) {
+      setStockTicker(locationTicker)
+      return () => {
+        isMounted = false
+      }
+    }
+
+    async function resolveTicker() {
+      try {
+        const result = await lookupStock(stockName)
+        if (!isMounted) return
+        setStockTicker(result?.ticker || null)
+      } catch (err) {
+        console.warn('[ChatPage] failed to resolve ticker', err)
+        if (isMounted) {
+          setStockTicker(null)
+        }
+      }
+    }
+
+    resolveTicker()
+
+    return () => {
+      isMounted = false
+    }
+  }, [stockName, locationTicker])
+
   // 닉네임 로드
   useEffect(() => {
     const storedNickname = localStorage.getItem('userNickname')
@@ -393,11 +427,15 @@ function ChatPage() {
           })
         } else {
           // 다른 종목은 기존 튜닝된 API 사용
-          const response = await getAIResponse(userMessage, stockName, userNickname)
+          const response = await sendChatMessage({
+            ticker: stockTicker || '005930.KS',
+            name: stockName,
+            question: userMessage
+          })
           
           // mood 업데이트
-          if (response.metadata && response.metadata.mood) {
-            setCurrentMood(response.metadata.mood)
+          if (response.mood) {
+            setCurrentMood(response.mood)
           }
           
           setMessages(prev => {
@@ -408,13 +446,13 @@ function ChatPage() {
                 id: Date.now() + 1,
                 type: 'bot',
                 sender: `${stockName} 키우Me`,
-                content: response.content,
+                content: response.paragraphs || [],
                 timestamp: getFormattedTimestamp()
               },
               {
                 id: Date.now() + 2,
                 type: 'suggestions',
-                suggestions: response.suggestions
+                suggestions: response.suggestions || []
               }
             ]
           })
@@ -461,11 +499,15 @@ function ChatPage() {
 
     // Get AI response
     try {
-      const response = await getAIResponse(suggestion, stockName, userNickname)
+      const response = await sendChatMessage({
+        ticker: stockTicker || '005930.KS',
+        name: stockName,
+        question: suggestion
+      })
       
       // mood 업데이트
-      if (response.metadata && response.metadata.mood) {
-        setCurrentMood(response.metadata.mood)
+      if (response.mood) {
+        setCurrentMood(response.mood)
       }
       
       setMessages(prev => {
@@ -476,13 +518,13 @@ function ChatPage() {
             id: Date.now() + 1,
             type: 'bot',
             sender: `${stockName} 키우Me`,
-            content: response.content,
+            content: response.paragraphs || [],
             timestamp: getFormattedTimestamp()
           },
           {
             id: Date.now() + 2,
             type: 'suggestions',
-            suggestions: response.suggestions
+            suggestions: response.suggestions || []
           }
         ]
       })

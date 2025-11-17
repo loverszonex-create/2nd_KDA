@@ -1,9 +1,26 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, Star, Menu, Signal, Wifi, Battery, BatteryCharging, Navigation, Send, X } from 'lucide-react'
 import robotImage from '../assets/robot.png'
 import { getTimeAgo, getMockLastMessageTime } from '../utils/timeUtils'
-import { getMockStockPrice, getMultipleRealtimeStockPrices, STOCK_CODE_MAP } from '../utils/stockAPI'
+import { getMultipleRealtimeStockPrices, STOCK_CODE_MAP, searchStocks, normalizeStock, getMacroWeather, extractStockCode } from '../utils/stockAPI'
+
+const HEADER_COLOR = '#606CF2'
+const CUSTOM_STOCKS_KEY = 'kiwume:customStocks'
+const HIDDEN_DEFAULT_STOCKS_KEY = 'kiwume:hiddenDefaultStocks'
+
+const readStoredArray = (key, fallback = []) => {
+  if (typeof window === 'undefined') return fallback
+  try {
+    const stored = window.localStorage.getItem(key)
+    if (!stored) return fallback
+    const parsed = JSON.parse(stored)
+    return Array.isArray(parsed) ? parsed : fallback
+  } catch (error) {
+    console.warn(`[HomePage] Failed to parse ${key}`, error)
+    return fallback
+  }
+}
 import { getChatCount, calculateProgress } from '../utils/levelSystem'
 import { removeBookmark } from '../utils/bookmarkUtils'
 import { getCacheStats, clearChatHistory } from '../utils/chatCache'
@@ -12,11 +29,18 @@ function HomePage() {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('home') // 'home', 'history', or 'bookmark'
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [isSearchDropdownOpen, setIsSearchDropdownOpen] = useState(false)
+  const [isSearchLoading, setIsSearchLoading] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [customStocks, setCustomStocks] = useState(() => readStoredArray(CUSTOM_STOCKS_KEY))
+  const [hiddenDefaultStocks, setHiddenDefaultStocks] = useState(() => readStoredArray(HIDDEN_DEFAULT_STOCKS_KEY))
   const [currentTime, setCurrentTime] = useState(new Date())
   const [isCharging, setIsCharging] = useState(false)
   const [timeUpdateTrigger, setTimeUpdateTrigger] = useState(0)
   const [stockPrices, setStockPrices] = useState({})
   const [chatHistoryStocks, setChatHistoryStocks] = useState([])
+  const [currentTemperature, setCurrentTemperature] = useState('😐⚪')
   
   // 레벨 시스템 상태
   const [levelInfo, setLevelInfo] = useState({
@@ -29,31 +53,57 @@ function HomePage() {
     nextLevelName: '초보 투자자'
   })
 
+  const searchBoxRef = useRef(null)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(CUSTOM_STOCKS_KEY, JSON.stringify(customStocks))
+    } catch (error) {
+      console.warn('[HomePage] Failed to persist custom stocks', error)
+    }
+  }, [customStocks])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(HIDDEN_DEFAULT_STOCKS_KEY, JSON.stringify(hiddenDefaultStocks))
+    } catch (error) {
+      console.warn('[HomePage] Failed to persist hidden stocks', error)
+    }
+  }, [hiddenDefaultStocks])
+
+  const trackedStockCodes = useMemo(() => {
+    const map = { ...STOCK_CODE_MAP }
+    customStocks.forEach((stock) => {
+      if (!stock?.name) return
+      const code = stock.code || extractStockCode(stock.ticker || stock.name)
+      if (code) {
+        map[stock.name] = code
+      }
+    })
+    return map
+  }, [customStocks])
+
   // 실시간 주가 데이터 로드
   useEffect(() => {
+    let priceTimer
     const loadStockPrices = async () => {
       try {
-        const prices = await getMultipleRealtimeStockPrices(STOCK_CODE_MAP)
+        const prices = await getMultipleRealtimeStockPrices(trackedStockCodes)
         setStockPrices(prices)
       } catch (error) {
         console.error('주가 데이터 로드 실패:', error)
-        // 실패 시 Mock 데이터 사용
-        const mockPrices = {}
-        Object.keys(STOCK_CODE_MAP).forEach(name => {
-          mockPrices[name] = getMockStockPrice(name)
-        })
-        setStockPrices(mockPrices)
+        // 실패 시 이전 데이터를 유지
+        setStockPrices((prev) => ({ ...prev }))
       }
     }
     
-    // 초기 로드
     loadStockPrices()
-    
-    // 5분마다 업데이트
-    const priceTimer = setInterval(loadStockPrices, 5 * 60 * 1000)
+    priceTimer = setInterval(loadStockPrices, 5 * 60 * 1000)
     
     return () => clearInterval(priceTimer)
-  }, [])
+  }, [trackedStockCodes])
 
   // 레벨 정보 로드
   useEffect(() => {
@@ -87,6 +137,28 @@ function HomePage() {
     }, 60000) // 1분마다 "n분 전" 업데이트
 
     return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    let timerId
+    const loadTemperature = async () => {
+      try {
+        const data = await getMacroWeather()
+        if (data?.label) {
+          setCurrentTemperature(data.label)
+        } else if (data?.score !== undefined) {
+          setCurrentTemperature(`${Math.round(data.score)}°`)
+        } else {
+          setCurrentTemperature('😐⚪')
+        }
+      } catch (error) {
+        console.error('[HomePage] 시장 온도 로드 실패:', error)
+        setCurrentTemperature('😐⚪')
+      }
+    }
+    loadTemperature()
+    timerId = setInterval(loadTemperature, 5 * 60 * 1000)
+    return () => clearInterval(timerId)
   }, [])
 
   // 배터리 충전 상태 체크
@@ -123,11 +195,100 @@ function HomePage() {
       // 검색어를 가지고 "키우Me" 채팅방으로 이동하여 LLM과 대화
       navigate(`/chat/키우Me`, { state: { initialMessage: searchQuery } })
       setSearchQuery('') // 검색창 초기화
+      setIsSearchDropdownOpen(false)
     } else {
       // 검색어가 없으면 그냥 키우Me 채팅방으로 이동
       navigate(`/chat/키우Me`)
+      setIsSearchDropdownOpen(false)
     }
   }
+
+  const handleAddStock = (stock) => {
+    const normalized = normalizeStock(stock)
+    if (!normalized) return
+    setCustomStocks((prev) => {
+      const exists = prev.some(
+        (item) =>
+          (item.ticker || item.code || item.name) ===
+          (normalized.ticker || normalized.code || normalized.name)
+      )
+      if (exists) return prev
+      return [{ ...normalized, addedAt: Date.now() }, ...prev]
+    })
+    setActiveTab('home')
+    setSearchQuery('')
+    setIsSearchDropdownOpen(false)
+    setSearchResults([])
+  }
+
+  const handleRemoveHomeStock = (event, stock) => {
+    event?.stopPropagation()
+    if (stock?.isCustom) {
+      setCustomStocks((prev) =>
+        prev.filter(
+          (item) =>
+            (item.ticker || item.code || item.name) !==
+            (stock.ticker || stock.code || stock.name)
+        )
+      )
+    } else if (stock?.name) {
+      setHiddenDefaultStocks((prev) => {
+        if (prev.includes(stock.name)) return prev
+        return [...prev, stock.name]
+      })
+    }
+  }
+
+  const handleSearchResultClick = (stock) => {
+    if (!stock?.name) return
+    setSearchQuery('')
+    setIsSearchDropdownOpen(false)
+    navigate(`/chat/${stock.name}`, {
+      state: {
+        ticker: stock.ticker,
+        initialMessage: ''
+      }
+    })
+  }
+
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([])
+      setIsSearchDropdownOpen(false)
+      setSearchError('')
+      return
+    }
+
+    setIsSearchLoading(true)
+    setSearchError('')
+    const debounceId = setTimeout(async () => {
+      try {
+        const results = await searchStocks(searchQuery.trim())
+        setSearchResults(results.slice(0, 8))
+        setIsSearchDropdownOpen(true)
+      } catch (error) {
+        console.error('검색 실패:', error)
+        setSearchResults([])
+        setSearchError('검색 중 오류가 발생했어요.')
+        setIsSearchDropdownOpen(true)
+      } finally {
+        setIsSearchLoading(false)
+      }
+    }, 250)
+
+    return () => clearTimeout(debounceId)
+  }, [searchQuery])
+
+  useEffect(() => {
+    const handleOutsideClick = (event) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(event.target)) {
+        setIsSearchDropdownOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [])
 
   // 등락률 계산 함수
   const getChangeRate = (name) => {
@@ -137,11 +298,58 @@ function HomePage() {
     return rate >= 0 ? `+${rate.toFixed(2)}%` : `${rate.toFixed(2)}%`
   }
 
+  const getLogoPlaceholder = (name = '') => {
+    if (!name) return 'AI'
+    const trimmed = name.replace(/\s+/g, '')
+    return trimmed.slice(0, 3).toUpperCase() || 'AI'
+  }
+
+  const getLogoFontSize = (text = '') => {
+    const length = text.length || 1
+    if (length === 1) return '1rem'
+    if (length === 2) return '0.9rem'
+    return '0.75rem'
+  }
+
+  const renderLogoContent = (chat) => {
+    switch (chat.logo) {
+      case 'samsung':
+        return <div className="text-blue-600 font-bold text-[10px]">SAMSUNG</div>
+      case 'battery':
+        return <div className="text-green-600 text-xl">🔋</div>
+      case 'samsungsdi':
+        return <div className="text-indigo-600 font-bold text-[10px]">SDI</div>
+      case 'hyundai':
+        return <div className="text-blue-800 font-bold text-[10px]">HYUNDAI</div>
+      case 'lg':
+        return <div className="text-red-500 font-bold text-[10px]">LG</div>
+      case 'kia':
+        return <div className="text-gray-700 font-bold text-[10px]">KIA</div>
+      case 'sk':
+        return <div className="text-red-600 font-bold text-[10px]">SK</div>
+      case 'finance':
+        return <div className="text-green-600 text-xl">💰</div>
+      default: {
+        const letters = chat.logoText || getLogoPlaceholder(chat.name)
+        return (
+          <span
+            className="text-indigo-600 font-semibold"
+            style={{ fontSize: getLogoFontSize(letters) }}
+          >
+            {letters}
+          </span>
+        )
+      }
+    }
+  }
+
   // 홈 탭 - 금융주 팀톡 제외한 7개 종목
-  const homeStocks = [
+  const defaultHomeStocks = [
     {
       id: 1,
       name: '삼성전자',
+      code: STOCK_CODE_MAP['삼성전자'],
+      ticker: `${STOCK_CODE_MAP['삼성전자']}.KS`,
       category: '',
       lastMessage: '초심으로 돌아가자 .. 10만전자 될까?',
       lastMessageTime: getMockLastMessageTime(0.5), // 30초 전
@@ -152,6 +360,8 @@ function HomePage() {
     {
       id: 2,
       name: '에코프로',
+      code: STOCK_CODE_MAP['에코프로'],
+      ticker: `${STOCK_CODE_MAP['에코프로']}.KS`,
       category: '#2차전지',
       lastMessage: 'K-양극재 신화',
       lastMessageTime: getMockLastMessageTime(5), // 5분 전
@@ -162,6 +372,8 @@ function HomePage() {
     {
       id: 3,
       name: '삼성SDI',
+      code: STOCK_CODE_MAP['삼성SDI'],
+      ticker: `${STOCK_CODE_MAP['삼성SDI']}.KS`,
       category: '#2차전지',
       lastMessage: '꿈의 배터리 선도주자',
       lastMessageTime: getMockLastMessageTime(10), // 10분 전
@@ -172,6 +384,8 @@ function HomePage() {
     {
       id: 4,
       name: '현대차',
+      code: STOCK_CODE_MAP['현대차'],
+      ticker: `${STOCK_CODE_MAP['현대차']}.KS`,
       category: '#자동차',
       lastMessage: '명실상부 자동차 대장주',
       lastMessageTime: getMockLastMessageTime(30), // 30분 전
@@ -182,6 +396,8 @@ function HomePage() {
     {
       id: 5,
       name: 'LG에너지솔루션',
+      code: STOCK_CODE_MAP['LG에너지솔루션'],
+      ticker: `${STOCK_CODE_MAP['LG에너지솔루션']}.KS`,
       category: '#2차전지',
       lastMessage: '글로벌 1위 K-배터리',
       lastMessageTime: getMockLastMessageTime(60), // 1시간 전
@@ -192,6 +408,8 @@ function HomePage() {
     {
       id: 6,
       name: '기아',
+      code: STOCK_CODE_MAP['기아'],
+      ticker: `${STOCK_CODE_MAP['기아']}.KS`,
       category: '#자동차',
       lastMessage: 'RV/하이브리드 글로벌 강자',
       lastMessageTime: getMockLastMessageTime(120), // 2시간 전
@@ -202,6 +420,8 @@ function HomePage() {
     {
       id: 7,
       name: 'SK하이닉스',
+      code: STOCK_CODE_MAP['SK하이닉스'],
+      ticker: `${STOCK_CODE_MAP['SK하이닉스']}.KS`,
       category: '#반도체',
       lastMessage: 'HBM 시장 선두주자',
       lastMessageTime: getMockLastMessageTime(1440), // 어제 (24시간 전)
@@ -214,53 +434,9 @@ function HomePage() {
   // 대화 기록 탭 - 대화 이력이 있는 종목만 표시
   useEffect(() => {
     if (activeTab === 'history') {
-      const cacheStats = getCacheStats()
-      console.log('[HomePage] 대화 기록 통계:', cacheStats)
-      
-      // 모든 종목 템플릿
-      const allStockTemplates = {
-        '삼성전자': { id: 1, category: '', badge: '국내', logo: 'samsung' },
-        'SK하이닉스': { id: 2, category: '#반도체', badge: '국내', logo: 'sk' },
-        '삼성SDI': { id: 3, category: '#2차전지', badge: '국내', logo: 'samsungsdi' },
-        '현대차': { id: 4, category: '#자동차', badge: '국내', logo: 'hyundai' },
-        'LG에너지솔루션': { id: 5, category: '#2차전지', badge: '국내', logo: 'lg' },
-        '기아': { id: 6, category: '#자동차', badge: '국내', logo: 'kia' },
-        '에코프로': { id: 7, category: '#2차전지', badge: '국내', logo: 'battery' }
-      }
-      
-      const historyStocks = []
-      
-      // 대화 이력이 있는 종목만 추가
-      cacheStats.chats.forEach((chat, index) => {
-        const template = allStockTemplates[chat.stockName]
-        if (template) {
-          historyStocks.push({
-            ...template,
-            id: index + 1,
-            name: chat.stockName,
-            lastMessage: `${chat.messageCount}개의 메시지`,
-            lastMessageTime: chat.timestamp,
-            changeRate: getChangeRate(chat.stockName)
-          })
-        }
-      })
-      
-      // 금융주 팀톡은 항상 맨 뒤에 추가
-      historyStocks.push({
-        id: 999,
-        name: '금융주 팀톡',
-        category: '',
-        lastMessage: '@미래에셋증권 @하나금융지주',
-        lastMessageTime: getMockLastMessageTime(1500),
-        badge: '국내',
-        changeRate: getChangeRate('금융주 팀톡'),
-        logo: 'finance'
-      })
-      
-      setChatHistoryStocks(historyStocks)
-      console.log('[HomePage] 대화 기록 종목:', historyStocks.map(s => s.name))
+      refreshHistoryStocks()
     }
-  }, [activeTab, stockPrices, timeUpdateTrigger])
+  }, [activeTab, stockPrices, timeUpdateTrigger, customStocks])
 
   // 북마크 데이터 로드
   const [bookmarks, setBookmarks] = useState([])
@@ -295,58 +471,103 @@ function HomePage() {
   }
 
   // 대화 기록 삭제 핸들러
+  const refreshHistoryStocks = () => {
+    const cacheStats = getCacheStats()
+    console.log('[HomePage] 대화 기록 통계:', cacheStats)
+    
+    const allStockTemplates = {
+      '삼성전자': { id: 1, category: '', badge: '국내', logo: 'samsung', ticker: `${STOCK_CODE_MAP['삼성전자']}.KS`, code: STOCK_CODE_MAP['삼성전자'] },
+      'SK하이닉스': { id: 2, category: '#반도체', badge: '국내', logo: 'sk', ticker: `${STOCK_CODE_MAP['SK하이닉스']}.KS`, code: STOCK_CODE_MAP['SK하이닉스'] },
+      '삼성SDI': { id: 3, category: '#2차전지', badge: '국내', logo: 'samsungsdi', ticker: `${STOCK_CODE_MAP['삼성SDI']}.KS`, code: STOCK_CODE_MAP['삼성SDI'] },
+      '현대차': { id: 4, category: '#자동차', badge: '국내', logo: 'hyundai', ticker: `${STOCK_CODE_MAP['현대차']}.KS`, code: STOCK_CODE_MAP['현대차'] },
+      'LG에너지솔루션': { id: 5, category: '#2차전지', badge: '국내', logo: 'lg', ticker: `${STOCK_CODE_MAP['LG에너지솔루션']}.KS`, code: STOCK_CODE_MAP['LG에너지솔루션'] },
+      '기아': { id: 6, category: '#자동차', badge: '국내', logo: 'kia', ticker: `${STOCK_CODE_MAP['기아']}.KS`, code: STOCK_CODE_MAP['기아'] },
+      '에코프로': { id: 7, category: '#2차전지', badge: '국내', logo: 'battery', ticker: `${STOCK_CODE_MAP['에코프로']}.KS`, code: STOCK_CODE_MAP['에코프로'] }
+    }
+
+    const customTemplateMap = customStocks.reduce((acc, stock, idx) => {
+      if (stock?.name) {
+        acc[stock.name] = {
+          id: 1000 + idx,
+          category: stock.category || '#사용자등록',
+          badge: stock.badge || '국내',
+          logoText: stock.name?.slice(0, 3)?.toUpperCase() || 'NEW',
+          ticker: stock.ticker || null,
+          code: stock.code || null,
+          isCustom: true
+        }
+      }
+      return acc
+    }, {})
+
+    const historyStocks = []
+    const sortedChats = [...cacheStats.chats].sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    )
+
+    sortedChats.forEach((chat, index) => {
+      const template = allStockTemplates[chat.stockName] || customTemplateMap[chat.stockName]
+      if (!template) return
+      historyStocks.push({
+        ...template,
+        id: index + 1,
+        name: chat.stockName,
+        lastMessage: `${chat.messageCount}개의 메시지`,
+        lastMessageTime: chat.timestamp,
+        changeRate: getChangeRate(chat.stockName)
+      })
+    })
+
+    historyStocks.push({
+      id: 999,
+      name: '금융주 팀톡',
+      category: '',
+      lastMessage: '@미래에셋증권 @하나금융지주',
+      lastMessageTime: getMockLastMessageTime(1500),
+      badge: '국내',
+      changeRate: getChangeRate('금융주 팀톡'),
+      logo: 'finance'
+    })
+
+    setChatHistoryStocks(historyStocks)
+    console.log('[HomePage] 대화 기록 종목:', historyStocks.map((s) => s.name))
+  }
+
   const handleClearChatHistory = (e, stockName) => {
     e.stopPropagation() // 클릭 이벤트 전파 방지
     const confirmed = window.confirm(`${stockName}와의 대화 기록을 삭제하시겠습니까?`)
     if (confirmed) {
       console.log(`[HomePage] 🗑️ 대화 기록 삭제: ${stockName}`)
       clearChatHistory(stockName)
-      
-      // 대화 기록 목록 새로고침
       if (activeTab === 'history') {
-        const cacheStats = getCacheStats()
-        const allStockTemplates = {
-          '삼성전자': { id: 1, category: '', badge: '국내', logo: 'samsung' },
-          'SK하이닉스': { id: 2, category: '#반도체', badge: '국내', logo: 'sk' },
-          '삼성SDI': { id: 3, category: '#2차전지', badge: '국내', logo: 'samsungsdi' },
-          '현대차': { id: 4, category: '#자동차', badge: '국내', logo: 'hyundai' },
-          'LG에너지솔루션': { id: 5, category: '#2차전지', badge: '국내', logo: 'lg' },
-          '기아': { id: 6, category: '#자동차', badge: '국내', logo: 'kia' },
-          '에코프로': { id: 7, category: '#2차전지', badge: '국내', logo: 'battery' }
-        }
-        
-        const historyStocks = []
-        cacheStats.chats.forEach((chat, index) => {
-          const template = allStockTemplates[chat.stockName]
-          if (template) {
-            historyStocks.push({
-              ...template,
-              id: index + 1,
-              name: chat.stockName,
-              lastMessage: `${chat.messageCount}개의 메시지`,
-              lastMessageTime: chat.timestamp,
-              changeRate: getChangeRate(chat.stockName)
-            })
-          }
-        })
-        
-        historyStocks.push({
-          id: 999,
-          name: '금융주 팀톡',
-          category: '',
-          lastMessage: '@미래에셋증권 @하나금융지주',
-          lastMessageTime: getMockLastMessageTime(1500),
-          badge: '국내',
-          changeRate: getChangeRate('금융주 팀톡'),
-          logo: 'finance'
-        })
-        
-        setChatHistoryStocks(historyStocks)
+        refreshHistoryStocks()
       }
     }
   }
 
-  const displayedStocks = activeTab === 'home' ? homeStocks : (activeTab === 'history' ? chatHistoryStocks : [])
+  const mergedHomeStocks = [
+    ...customStocks.map((stock, index) => ({
+      id: `custom-${stock.ticker || stock.code || index}`,
+      name: stock.name,
+      category: stock.category || '#사용자등록',
+      lastMessage: stock.summary || '종목과 대화를 시작해 보세요.',
+      lastMessageTime: stock.addedAt || new Date().toISOString(),
+      badge: stock.badge || '국내',
+      changeRate: getChangeRate(stock.name),
+      logoText: stock.name?.slice(0, 3)?.toUpperCase() || 'NEW',
+      ticker: stock.ticker,
+      code: stock.code,
+      isCustom: true
+    })),
+    ...defaultHomeStocks
+      .filter((stock) => !hiddenDefaultStocks.includes(stock.name))
+      .map((stock) => ({
+        ...stock,
+        isCustom: false
+      }))
+  ]
+
+  const displayedStocks = activeTab === 'home' ? mergedHomeStocks : (activeTab === 'history' ? chatHistoryStocks : [])
 
   return (
     <div className="w-full min-h-screen relative bg-white overflow-y-auto">
@@ -396,59 +617,76 @@ function HomePage() {
         </button>
       </div>
 
-      {/* Hero Section */}
-      <div className="w-full h-[230px] relative overflow-hidden rounded-br-[40px]" style={{ backgroundColor: '#606CF2' }}>
-        {/* AI 로봇 이미지 - 왼쪽 */}
-        <img 
-          className="absolute left-[50px] top-[30px] object-contain" 
-          style={{ width: '100px', height: '100px', transform: 'scale(2)' }}
-          src={robotImage}
-          alt="AI Robot"
-        />
-        {/* 오늘의 날씨 */}
-        <div className="absolute right-4 top-[-1px] text-left mb-2">
-          <div className="relative inline-flex items-center gap-1 px-2 py-1 rounded-full overflow-hidden" style={{ 
-            zIndex: 10, 
-            background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.15))',
-            backdropFilter: 'blur(10px)'
-          }}>
-            <span className="text-white text-xs font">오늘의 온도 : </span>
-            <span className="text-xs">🙂⚪</span>
-          </div>
-        </div>
-        {/* 오른쪽 상단 영역 */}
-        <div className="absolute right-[30px] top-[40px]">
-          {/* 레벨 배지 */}
-          <div className="relative inline-flex items-center gap-1 px-1.5 rounded-full mb-1 overflow-hidden" style={{ zIndex: 10, backgroundColor: 'rgba(30, 27, 75, 0.4)', paddingTop: '2px', paddingBottom: '3px' }}>
-            <div className="w-3.5 h-3.5 bg-yellow-400 rounded-full flex-shrink-0" style={{ zIndex: 2 }}></div>
-            <span className="text-yellow-400 text-xs font-semibold leading-none" style={{ zIndex: 2 }}>Lv.{String(levelInfo.level).padStart(2, '0')}</span>
-            
-            {/* Progress Bar inside badge */}
-            <div className="absolute bottom-0 left-0 w-full bg-yellow-400 transition-all duration-500 ease-out" style={{ width: `${levelInfo.progress}%`, height: '1px', zIndex: 1 }}>
+      <div className="relative w-full">
+        {/* Hero Section */}
+        <div className="w-full h-[230px] relative overflow-hidden rounded-br-[40px]" style={{ backgroundColor: '#606CF2' }}>
+          {/* AI 로봇 이미지 - 왼쪽 */}
+          <img 
+            className="absolute left-[50px] top-[30px] object-contain" 
+            style={{ width: '100px', height: '100px', transform: 'scale(2)' }}
+            src={robotImage}
+            alt="AI Robot"
+          />
+          {/* 오늘의 날씨 */}
+          <div className="absolute right-4 top-[3px] text-left mb-1" style={{ transform: 'scale(1)', transformOrigin: 'top right' }}>
+            <div className="relative inline-flex items-center gap-1 px-3 py-1.5 rounded-full overflow-hidden" style={{ 
+              zIndex: 10, 
+              background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.15))',
+              backdropFilter: 'blur(10px)'
+            }}>
+              <span className="text-white text-sm font-semibold">오늘의 온도</span>
+              <span className="text-sm">{currentTemperature}</span>
             </div>
           </div>
-          
-          {/* 타이틀 */}
-          <div className="text-left mb-2">
-            <h1 className="text-white font-bold leading-tight" style={{ fontSize: '1.28rem' }}>
-              종목과 대화하기<br/>키우Me
-            </h1>
+          {/* 오른쪽 상단 영역 */}
+          <div className="absolute right-[30px] top-[40px]">
+            {/* 레벨 배지 */}
+            <div className="relative inline-flex items-center gap-1 px-1.5 rounded-full mb-1 overflow-hidden" style={{ zIndex: 10, backgroundColor: 'rgba(30, 27, 75, 0.4)', paddingTop: '2px', paddingBottom: '3px' }}>
+              <div className="w-3.5 h-3.5 bg-yellow-400 rounded-full flex-shrink-0" style={{ zIndex: 2 }}></div>
+              <span className="text-yellow-400 text-xs font-semibold leading-none" style={{ zIndex: 2 }}>Lv.{String(levelInfo.level).padStart(2, '0')}</span>
+              
+              {/* Progress Bar inside badge */}
+              <div className="absolute bottom-0 left-0 w-full bg-yellow-400 transition-all duration-500 ease-out" style={{ width: `${levelInfo.progress}%`, height: '1px', zIndex: 1 }}>
+              </div>
+            </div>
+            
+            {/* 타이틀 */}
+            <div className="text-left mb-2">
+              <h1 className="text-white font-bold leading-tight" style={{ fontSize: '1.28rem' }}>
+                종목과 대화하기<br/>키우Me
+              </h1>
+            </div>
+
+            {/* 해시태그 */}
+            <div className="text-left mt-2">
+              <p className="text-white/50" style={{ fontSize: '0.8rem' }}>#소통 #Q&A</p>
+            </div>
           </div>
 
-          {/* 해시태그 */}
-          <div className="text-left mt-2">
-            <p className="text-white/50" style={{ fontSize: '0.8rem' }}>#소통 #Q&A</p>
+          {/* 하단 안내 문구 */}
+          <div className="absolute left-[20px] right-[20px] bottom-[20px] text-white text-[11px] leading-tight opacity-80">
+            키우Me의 답변은 생성형 AI를 활용한 답변으로 사실과 다를 수 있어요
           </div>
         </div>
 
-        {/* Search Bar - 하단 중앙 */}
-        <form onSubmit={handleSearch} className="absolute bottom-[40px] left-1/2 -translate-x-1/2 w-[350px]" style={{ height: '38.4px' }}>
+        {/* Search Bar - 헤더 외부 배치 (오버플로우 방지) */}
+        <form
+          ref={searchBoxRef}
+          onSubmit={handleSearch}
+          className="absolute bottom-[40px] left-1/2 -translate-x-1/2 w-[350px]"
+          style={{ height: '38.4px', zIndex: 40 }}
+        >
           <div className="relative w-full h-full p-[2px] bg-gradient-to-r from-cyan-500 via-blue-400 to-fuchsia-400 rounded-full shadow-lg">
             <div className="w-full h-full bg-white rounded-full flex items-center px-4">
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => {
+                  if (searchResults.length > 0) {
+                    setIsSearchDropdownOpen(true)
+                  }
+                }}
                 placeholder="키우Me에게 물어보세요"
                 className="flex-1 bg-transparent outline-none text-sm"
                 style={{ color: '#717BE4' }}
@@ -461,13 +699,77 @@ function HomePage() {
                 <Send className="w-4 h-4 text-white" strokeWidth={2.5} />
               </button>
             </div>
+            {isSearchDropdownOpen && (
+              <div
+                className="absolute left-0 right-0 top-full mt-3 bg-white rounded-2xl shadow-2xl border border-gray-100 z-50"
+                style={{ maxHeight: '260px' }}
+              >
+                <div className="max-h-[240px] overflow-y-auto">
+                  {isSearchLoading && (
+                    <div className="px-4 py-3 text-sm text-slate-500">검색 중...</div>
+                  )}
+                  {!isSearchLoading && searchError && (
+                    <div className="px-4 py-3 text-sm text-red-500">{searchError}</div>
+                  )}
+                  {!isSearchLoading && !searchError && searchResults.length === 0 && (
+                    <div className="px-4 py-3 text-sm text-slate-400">검색 결과가 없습니다.</div>
+                  )}
+                  {!isSearchLoading && !searchError && searchResults.length > 0 && (
+                    <ul className="divide-y divide-slate-100">
+                      {searchResults.map((stock) => (
+                        <li key={stock.ticker || stock.code || stock.name} className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className="flex-1 cursor-pointer"
+                              onClick={() => handleSearchResultClick(stock)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault()
+                                  handleSearchResultClick(stock)
+                                }
+                              }}
+                              role="button"
+                              tabIndex={0}
+                            >
+                              <div className="text-sm font-semibold text-slate-900">{stock.name}</div>
+                              <div className="text-xs text-slate-500">
+                                {stock.code || '-'}
+                                {stock.category ? ` · ${stock.category}` : ''}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  handleAddStock(stock)
+                                }}
+                                className="text-[11px] font-semibold px-3 py-1 rounded-full text-white"
+                                style={{ backgroundColor: HEADER_COLOR }}
+                              >
+                                추가
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  handleSearchResultClick(stock)
+                                }}
+                                className="text-[11px] font-semibold px-3 py-1 rounded-full text-indigo-500 border border-indigo-100"
+                              >
+                                대화
+                              </button>
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </form>
-
-        {/* 하단 안내 문구 */}
-        <div className="absolute left-[20px] right-[20px] bottom-[20px] text-white text-[11px] leading-tight opacity-80">
-          키우Me의 답변은 생성형 AI를 활용한 답변으로 사실과 다를 수 있어요
-        </div>
       </div>
 
       {/* Tabs */}
@@ -601,10 +903,19 @@ function HomePage() {
             {displayedStocks.map((chat) => (
             <div
               key={chat.id}
-              onClick={() => navigate(`/chat/${chat.name}`)}
+              onClick={() => navigate(`/chat/${chat.name}`, { state: { ticker: chat.ticker || null } })}
               className="w-full bg-white rounded-[10px] shadow-[0px_4px_4px_0px_rgba(0,0,0,0.09)] relative cursor-pointer hover:shadow-lg transition-all group"
             >
-              {/* 삭제 버튼 - 대화 기록 탭에서만 표시 (금융주 팀톡 제외) */}
+              {/* 삭제 버튼 */}
+              {activeTab === 'home' && (
+                <button
+                  onClick={(e) => handleRemoveHomeStock(e, chat)}
+                  className="absolute top-2 right-2 w-7 h-7 rounded-full bg-gray-100 hover:bg-red-100 flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100 z-10"
+                  title="관심 종목에서 제거"
+                >
+                  <X className="w-4 h-4 text-gray-600 hover:text-red-600" />
+                </button>
+              )}
               {activeTab === 'history' && chat.name !== '금융주 팀톡' && (
                 <button
                   onClick={(e) => handleClearChatHistory(e, chat.name)}
@@ -617,30 +928,7 @@ function HomePage() {
               
               {/* 로고 */}
               <div className="absolute w-14 h-14 left-[18px] top-[15px] bg-white rounded-full border border-stone-500 flex items-center justify-center overflow-hidden">
-                {chat.logo === 'samsung' && (
-                  <div className="text-blue-600 font-bold text-[10px]">SAMSUNG</div>
-                )}
-                {chat.logo === 'battery' && (
-                  <div className="text-green-600 text-xl">🔋</div>
-                )}
-                {chat.logo === 'samsungsdi' && (
-                  <div className="text-indigo-600 font-bold text-[10px]">SDI</div>
-                )}
-                {chat.logo === 'hyundai' && (
-                  <div className="text-blue-800 font-bold text-[10px]">HYUNDAI</div>
-                )}
-                {chat.logo === 'lg' && (
-                  <div className="text-red-500 font-bold text-[10px]">LG</div>
-                )}
-                {chat.logo === 'kia' && (
-                  <div className="text-gray-700 font-bold text-[10px]">KIA</div>
-                )}
-                {chat.logo === 'sk' && (
-                  <div className="text-red-600 font-bold text-[10px]">SK</div>
-                )}
-                {chat.logo === 'finance' && (
-                  <div className="text-green-600 text-xl">💰</div>
-                )}
+                {renderLogoContent(chat)}
               </div>
 
               {/* 종목명 */}

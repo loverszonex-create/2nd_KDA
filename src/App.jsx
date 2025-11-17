@@ -2,7 +2,6 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import HomePage from './pages/HomePage'
 import ChatPage from './pages/ChatPage'
 import ProfilePage from './pages/ProfilePage'
-import WeeklyReportPage from './pages/WeeklyReportPage'
 import BookmarkPage from './pages/BookmarkPage'
 
 function App() {
@@ -15,7 +14,6 @@ function App() {
             <Route path="/chat/:stockName" element={<ChatPage />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/dashboard" element={<ProfilePage />} />
-            <Route path="/weekly-report" element={<WeeklyReportPage />} />
             <Route path="/bookmarks" element={<BookmarkPage />} />
           </Routes>
         </div>

@@ -4,6 +4,7 @@ import cors from 'cors';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import axios from 'axios';
 import OpenAI from 'openai';
 import Groq from 'groq-sdk';
 import { createClient } from '@supabase/supabase-js';
@@ -188,6 +189,172 @@ const fmtPercent = (n) => {
   if (!Number.isFinite(num)) return 'N/A';
   return `${num >= 0 ? '+' : ''}${num.toFixed(2)}%`;
 };
+
+const normalizeTicker = (value) => {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  if (/^\d{6}$/.test(text)) return text;
+  const digits = text.replace(/[^0-9]/g, '');
+  if (!digits) return null;
+  if (digits.length === 6) return digits;
+  if (digits.length > 6) return digits.slice(-6);
+  return digits.padStart(6, '0');
+};
+
+const STOCK_SEARCH_CACHE_TTL_SEC = Number(process.env.STOCK_SEARCH_CACHE_TTL_SEC || 60);
+const STOCK_SEARCH_PAGE_SIZE = Number(process.env.STOCK_SEARCH_PAGE_SIZE || 20);
+const DAUM_SEARCH_ENDPOINT = process.env.DAUM_SEARCH_ENDPOINT || 'https://finance.daum.net/api/search';
+const DAUM_SEARCH_HEADERS = {
+  Referer: 'https://finance.daum.net',
+  'User-Agent':
+    process.env.SEARCH_USER_AGENT ||
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  Accept: 'application/json, text/plain, */*',
+  'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+  'X-Requested-With': 'XMLHttpRequest'
+};
+
+function selectBestStockMatch(list = [], query) {
+  if (!Array.isArray(list) || !list.length) return null;
+  const trimmed = String(query ?? '').trim();
+  const upper = trimmed.toUpperCase();
+  const normalizedCode = normalizeTicker(trimmed);
+
+  if (normalizedCode) {
+    const byCode = list.find((item) => (item?.code || '') === normalizedCode);
+    if (byCode) return byCode;
+    const tickerCandidate = `${normalizedCode}.KS`;
+    const byTicker = list.find((item) => (item?.ticker || '').toUpperCase() === tickerCandidate);
+    if (byTicker) return byTicker;
+  }
+
+  if (upper) {
+    const directTicker = list.find((item) => (item?.ticker || '').toUpperCase() === upper);
+    if (directTicker) return directTicker;
+  }
+
+  const lower = trimmed.toLowerCase();
+  if (lower) {
+    const byName = list.find((item) => (item?.name || '').toLowerCase() === lower);
+    if (byName) return byName;
+  }
+
+  if (normalizedCode) {
+    const byDisplay = list.find((item) => (item?.displayedCode || '').toUpperCase() === normalizedCode);
+    if (byDisplay) return byDisplay;
+  }
+
+  return list[0];
+}
+
+const mapMarketValue = (value) => {
+  if (!value) return null;
+  const normalized = String(value).trim().toUpperCase();
+  if (!normalized) return null;
+  if (normalized.includes('KOSDAQ') || normalized === 'DAQ') return { label: 'KOSDAQ', kis: 'Q' };
+  if (normalized.includes('KOSPI') || normalized === 'STOCK') return { label: 'KOSPI', kis: 'J' };
+  if (normalized.includes('KONEX') || normalized === 'KONEX') return { label: 'KONEX', kis: 'N' };
+  if (normalized.includes('ETF')) return { label: 'ETF', kis: 'E' };
+  if (normalized.includes('ETN')) return { label: 'ETN', kis: 'K' };
+  if (normalized.includes('ELW')) return { label: 'ELW', kis: 'L' };
+  if (normalized.includes('SPAC')) return { label: 'KOSDAQ', kis: 'Q' };
+  return null;
+};
+
+const inferMarketInfo = (item = {}) => {
+  const candidates = [
+    item.market,
+    item.marketCategory,
+    item.marketCode,
+    item.marketType,
+    item.symbolTypeName,
+    item.securitiesCategoryName,
+    item.typeName,
+    item.type
+  ];
+
+  for (const candidate of candidates) {
+    const mapped = mapMarketValue(candidate);
+    if (mapped) return mapped;
+  }
+
+  if (typeof item.symbolCode === 'string' && item.symbolCode.startsWith('Q')) {
+    return { label: 'KOSDAQ', kis: 'Q' };
+  }
+
+  return { label: 'KOSPI', kis: 'J' };
+};
+
+const resolveTickerSuffix = (item = {}, marketInfo = {}) => {
+  if (item?.nationCode && item.nationCode !== 'KR') {
+    return `.${item.nationCode}`;
+  }
+  if ((marketInfo?.label || '').toUpperCase() === 'KOSDAQ') return '.KQ';
+  if ((marketInfo?.label || '').toUpperCase() === 'KONEX') return '.KN';
+  if ((marketInfo?.label || '').toUpperCase() === 'ETF') return '.KS';
+  if ((marketInfo?.label || '').toUpperCase() === 'ETN') return '.KS';
+  return '.KS';
+};
+
+const mapDaumSearchItem = (item = {}) => {
+  const symbolCode = item.symbolCode || item.code || item.symbol;
+  if (typeof symbolCode !== 'string' || !symbolCode.startsWith('A')) return null;
+  const code = normalizeTicker(item.code || item.symbolCode || item.displayedCode || item.symbol);
+  if (!code) return null;
+
+  const marketInfo = inferMarketInfo(item);
+  const suffix = resolveTickerSuffix(item, marketInfo);
+  const ticker = `${code}${suffix}`;
+
+  return {
+    name: item.name || item.koreanName || item.displayedName || item.englishName || code,
+    ticker,
+    code,
+    displayedCode: item.symbolCode || item.displayedCode || code,
+    market: marketInfo?.label || null,
+    marketLabel: marketInfo?.label || null,
+    kisMarket: marketInfo?.kis || null,
+    category: item.industry || item.typeName || (marketInfo?.label ? `#${marketInfo.label}` : null),
+    badge: marketInfo?.label || '국내',
+    summary: item.industry || item.description || '검색으로 추가한 종목입니다.',
+    provider: 'daum',
+    raw: item
+  };
+};
+
+async function searchStocksByName(keyword, { limit = STOCK_SEARCH_PAGE_SIZE } = {}) {
+  const trimmed = String(keyword ?? '').trim();
+  if (!trimmed) return [];
+
+  const cacheKey = `stocksearch:${trimmed.toLowerCase()}:${limit}`;
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached?.results && Array.isArray(cached.results)) {
+      return cached.results;
+    }
+  } catch (err) {
+    console.warn('[stocks/search] cache read error', err.message || err);
+  }
+
+  const { data } = await axios.get(`${DAUM_SEARCH_ENDPOINT}?q=${encodeURIComponent(trimmed)}`, {
+    headers: DAUM_SEARCH_HEADERS,
+    timeout: Number(process.env.DAUM_SEARCH_TIMEOUT_MS || 5000)
+  });
+
+  const items = Array.isArray(data?.suggestItems) ? data.suggestItems : [];
+  const mapped = items.map(mapDaumSearchItem).filter(Boolean).slice(0, limit);
+
+  if (mapped.length) {
+    try {
+      await redis.set(cacheKey, { results: mapped }, { ex: STOCK_SEARCH_CACHE_TTL_SEC });
+    } catch (err) {
+      console.warn('[stocks/search] cache write error', err.message || err);
+    }
+  }
+
+  return mapped;
+}
 
 // cache key for embeddings
 const embKey = (q) => 'emb:q:' + crypto.createHash('sha1').update(q).digest('hex');
@@ -555,6 +722,55 @@ app.get('/diag-cnn', async (req, res) => {
       ok: false,
       error: String(error?.message || error)
     });
+  }
+});
+
+app.get('/stocks/search', async (req, res) => {
+  const keyword = String(req.query.q ?? '').trim();
+  const limit = Number(req.query.limit) || STOCK_SEARCH_PAGE_SIZE;
+
+  if (!keyword) {
+    return res.status(400).json({ ok: false, message: '검색어를 입력해주세요.' });
+  }
+
+  try {
+    const results = await searchStocksByName(keyword, { limit });
+    res.json({ ok: true, results });
+  } catch (error) {
+    const status = error?.response?.status || 500;
+    const message =
+      error?.response?.data?.message ||
+      error?.message ||
+      '종목 검색 중 오류가 발생했어요.';
+    console.error('[stocks/search]', message);
+    res.status(status).json({ ok: false, message });
+  }
+});
+
+app.get('/stocks/lookup', async (req, res) => {
+  const keyword = String(req.query.q ?? '').trim();
+  if (!keyword) {
+    return res.status(400).json({ ok: false, message: '검색어를 입력해주세요.' });
+  }
+
+  try {
+    const results = await searchStocksByName(keyword, { limit: Number(req.query.limit) || STOCK_SEARCH_PAGE_SIZE });
+    if (!results.length) {
+      return res.status(404).json({ ok: false, message: '검색 결과가 없습니다.' });
+    }
+    const selected = selectBestStockMatch(results, keyword);
+    if (!selected) {
+      return res.status(404).json({ ok: false, message: '검색 결과가 없습니다.' });
+    }
+    res.json({ ok: true, result: selected });
+  } catch (error) {
+    const status = error?.response?.status || 500;
+    const message =
+      error?.response?.data?.message ||
+      error?.message ||
+      '종목 검색 중 오류가 발생했어요.';
+    console.error('[stocks/lookup]', message);
+    res.status(status).json({ ok: false, message });
   }
 });
 
