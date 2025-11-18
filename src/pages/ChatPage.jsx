@@ -410,7 +410,7 @@ function ChatPage() {
       try {
         // "키우Me" 종목은 간단한 챗봇 API 사용
         if (stockName === '키우Me') {
-          const response = await getSimpleChatResponse(userMessage)
+          const response = await getSimpleChatResponse(userMessage, null, userNickname)
           
           setMessages(prev => {
             const withoutSuggestions = prev.filter(msg => msg.type !== 'suggestions')
@@ -427,10 +427,22 @@ function ChatPage() {
           })
         } else {
           // 다른 종목은 기존 튜닝된 API 사용
+          // 이전 종목 메시지 찾기 (사용자 메시지 추가 전 상태에서)
+          const previousBotMessage = messagesWithoutSuggestions
+            .filter(msg => msg.type === 'bot')
+            .slice(-1)[0]
+          const previousMessageText = previousBotMessage 
+            ? (Array.isArray(previousBotMessage.content) 
+                ? previousBotMessage.content.join(' ') 
+                : previousBotMessage.content)
+            : ''
+          
           const response = await sendChatMessage({
             ticker: stockTicker || '005930.KS',
             name: stockName,
-            question: userMessage
+            question: userMessage,
+            nickname: userNickname,
+            previousMessage: previousMessageText
           })
           
           // mood 업데이트
@@ -452,7 +464,9 @@ function ChatPage() {
               {
                 id: Date.now() + 2,
                 type: 'suggestions',
-                suggestions: response.suggestions || []
+                suggestions: (Array.isArray(response.suggestions) && response.suggestions.length > 0)
+                  ? response.suggestions
+                  : ['최근 주가는 어때?', '투자 의견을 알려줘']
               }
             ]
           })
@@ -499,10 +513,22 @@ function ChatPage() {
 
     // Get AI response
     try {
+      // 이전 종목 메시지 찾기 (제안 클릭 전 상태에서)
+      const previousBotMessage = messagesWithoutSuggestions
+        .filter(msg => msg.type === 'bot')
+        .slice(-1)[0]
+      const previousMessageText = previousBotMessage 
+        ? (Array.isArray(previousBotMessage.content) 
+            ? previousBotMessage.content.join(' ') 
+            : previousBotMessage.content)
+        : ''
+      
       const response = await sendChatMessage({
         ticker: stockTicker || '005930.KS',
         name: stockName,
-        question: suggestion
+        question: suggestion,
+        nickname: userNickname,
+        previousMessage: previousMessageText
       })
       
       // mood 업데이트

@@ -1,34 +1,12 @@
 import { buildGatewayUrl, fetchJson } from './apiClient'
 import { formatNumber, formatPercent, formatPlain } from './stockAPI'
 
-const FALLBACK_SUGGESTIONS = [
-  '최근 주가는 어때?',
-  '투자자들이 주목하는 이슈는?',
-  'KOSPI랑 비교해줘',
-  '최근 뉴스 요약해줘'
-]
-
 function splitTextIntoParagraphs(text) {
   if (!text) return []
   return text
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean)
-}
-
-function buildSuggestions(data) {
-  const suggestions = new Set()
-  if (data?.news?.highlights?.length) {
-    suggestions.add('최근 뉴스 요약해줘')
-  }
-  if (data?.visuals?.snapshot?.benchmark) {
-    suggestions.add('KOSPI랑 비교해줘')
-  }
-  if (data?.visuals?.history?.length) {
-    suggestions.add('최근 추세를 요약해줘')
-  }
-  FALLBACK_SUGGESTIONS.forEach((item) => suggestions.add(item))
-  return Array.from(suggestions).slice(0, 4)
 }
 
 export function formatAsOf(isoString) {
@@ -52,7 +30,7 @@ export function getFormattedTimestamp() {
   return `${month}/${date} ${hours}:${minutes} 기준`
 }
 
-export async function sendChatMessage({ ticker, name, question, stream = false }) {
+export async function sendChatMessage({ ticker, name, question, stream = false, nickname, previousMessage }) {
   if (!ticker) {
     throw new Error('ticker is required')
   }
@@ -63,6 +41,8 @@ export async function sendChatMessage({ ticker, name, question, stream = false }
     stream: stream ? 'true' : 'false'
   })
   if (name) params.append('name', name)
+  if (nickname) params.append('nickname', nickname)
+  if (previousMessage) params.append('previousMessage', previousMessage)
 
   if (stream) {
     const url = buildGatewayUrl('/chat')
@@ -81,7 +61,12 @@ export async function sendChatMessage({ ticker, name, question, stream = false }
   })
 
   const paragraphs = splitTextIntoParagraphs(data?.text || '')
-  const suggestions = buildSuggestions(data)
+  // 서버에서 LLM 기반으로 생성한 제안 사용, 없거나 비어있으면 예비 제안 사용
+  const fallbackSuggestions = ['최근 주가는 어때?', '투자 의견을 알려줘']
+  const serverSuggestions = data?.suggestions || []
+  const suggestions = (Array.isArray(serverSuggestions) && serverSuggestions.length > 0) 
+    ? serverSuggestions 
+    : fallbackSuggestions
 
   return {
     raw: data,

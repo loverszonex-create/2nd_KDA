@@ -6,9 +6,10 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
  * 간단한 OpenAI 챗봇 응답
  * @param {string} userMessage - 사용자 질문
  * @param {Function} onDelta - 스트리밍 콜백
+ * @param {string} nickname - 사용자 닉네임
  * @returns {Promise<{content: string, suggestions: string[]}>}
  */
-export async function getSimpleChatResponse(userMessage, onDelta = null) {
+export async function getSimpleChatResponse(userMessage, onDelta = null, nickname = null) {
   try {
     console.log('[SimpleChat] 질문:', userMessage)
     
@@ -19,7 +20,8 @@ export async function getSimpleChatResponse(userMessage, onDelta = null) {
       },
       body: JSON.stringify({
         message: userMessage,
-        stream: true
+        stream: true,
+        nickname: nickname || undefined
       })
     })
     

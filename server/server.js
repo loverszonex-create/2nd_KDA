@@ -852,13 +852,17 @@ app.get('/chat-test', async (req,res)=>{
 
 // ===== 간단한 OpenAI 챗봇 API (튜닝 없이) =====
 app.post('/simple-chat', async (req, res) => {
-  const { message, stream = true } = req.body;
+  const { message, stream = true, nickname } = req.body;
   
   if (!message) {
     return res.status(400).json({ ok: false, error: 'Message is required' });
   }
 
   console.log('[simple-chat] 질문:', message);
+  
+  // 닉네임이 있으면 "님"을 붙여서 사용
+  const userTitle = nickname ? `${nickname}님` : '';
+  const systemContent = `키움 증권 측의 키우Me와 동일한 챗봇이야. 친절하고 전문적으로 답변해줘. 한국어로 답변해. ${userTitle ? `대화 상대는 ${userTitle}이야. 답변할 때 ${userTitle}이라고 부르면서 대화해.` : ''} 중요: 절대로 "전문가가 답변해드리겠습니다", "24시간 내 답변", "전문 상담", "전문가 의견" 같은 표현을 사용하지 마. 너는 AI 챗봇이며, 직접 답변을 제공하는 역할이야.`;
 
   if (!stream) {
     // 비스트리밍 모드
@@ -868,7 +872,7 @@ app.post('/simple-chat', async (req, res) => {
         messages: [
           {
             role: 'system',
-            content: '키움 증권 측의 키우Me와 동일한 챗봇이야. 친절하고 전문적으로 답변해줘. 한국어로 답변해. 중요: 절대로 "전문가가 답변해드리겠습니다", "24시간 내 답변", "전문 상담", "전문가 의견" 같은 표현을 사용하지 마. 너는 AI 챗봇이며, 직접 답변을 제공하는 역할이야.'
+            content: systemContent
           },
           {
             role: 'user',
@@ -906,7 +910,7 @@ app.post('/simple-chat', async (req, res) => {
         messages: [
           {
             role: 'system',
-            content: '키움 증권 측의 키우Me와 동일한 챗봇이야. 친절하고 전문적으로 답변해줘. 한국어로 답변해. 중요: 절대로 "전문가가 답변해드리겠습니다", "24시간 내 답변", "전문 상담", "전문가 의견" 같은 표현을 사용하지 마. 너는 AI 챗봇이며, 직접 답변을 제공하는 역할이야.'
+            content: systemContent
           },
           {
             role: 'user',
@@ -944,6 +948,8 @@ app.get('/chat', async (req, res) => {
   const ticker = String(req.query.ticker || '005930.KS');
   const code = ticker.split('.')[0];
   const streamMode = (req.query.stream ?? 'true') !== 'false';
+  const nickname = String(req.query.nickname || '').trim();
+  const previousMessage = String(req.query.previousMessage || '').trim(); // 이전 종목 메시지
   const intent = detectIntent(q);
 
   try {
@@ -1105,12 +1111,16 @@ app.get('/chat', async (req, res) => {
     }
 
     const guidelineLines = guidelineBase.map((line, idx) => `${idx + 1}. ${line}`);
+    
+    // 닉네임이 있으면 "님"을 붙여서 사용
+    const userTitle = nickname ? `${nickname}님` : '';
 
     const system = `
 너는 ${personaLabel} 종목이 직접 말하는 1인칭 페르소나다.
 ${persona.bio || ''}
 화자의 기본 스타일: ${persona.style || '담담하고 정보 중심'}
 독특한 말버릇: ${persona.quirks || '중요 숫자에는 기준 시각을 덧붙임'}
+${userTitle ? `대화 상대는 ${userTitle}이야. 답변할 때 ${userTitle}이라고 부르면서 대화해.` : ''}
 ${moodBrief}
 대답 지침:
 ${guidelineLines.join('\n')}`.trim();
@@ -1133,12 +1143,55 @@ ${guidelineLines.join('\n')}`.trim();
         ]
       });
       const text = resp.choices?.[0]?.message?.content || '';
+      
+      // LLM 기반 제안 생성 (이전 종목 메시지 기반)
+      let suggestions = [];
+      if (previousMessage) {
+        try {
+          const suggestionResp = await groq.chat.completions.create({
+            model: 'llama-3.1-8b-instant',
+            temperature: 0.7,
+            messages: [
+              {
+                role: 'system',
+                content: `너는 ${personaLabel} 종목과의 대화에서 사용자가 다음에 물어볼 만한 질문을 2개 생성하는 역할이야. 이전 종목 메시지 내용을 바탕으로 자연스럽고 관련성 높은 질문을 만들어줘. 각 질문은 한 문장으로, 간결하고 명확하게 작성해. 질문만 반환하고 다른 설명은 하지 마.`
+              },
+              {
+                role: 'user',
+                content: `이전 종목 메시지:\n${previousMessage}\n\n위 메시지 내용을 바탕으로 사용자가 다음에 물어볼 만한 질문 2개를 생성해줘. 각 질문은 한 줄로 작성하고, 줄바꿈으로 구분해줘.`
+              }
+            ],
+            max_tokens: 200
+          });
+          
+          const suggestionText = suggestionResp.choices?.[0]?.message?.content || '';
+          suggestions = suggestionText
+            .split('\n')
+            .map(s => s.trim())
+            .filter(s => s.length > 0 && !s.match(/^[0-9]+\./)) // 번호 제거
+            .slice(0, 2);
+          
+          // LLM이 빈 배열을 반환하거나 제안이 없으면 예비 제안 사용
+          if (!Array.isArray(suggestions) || suggestions.length === 0) {
+            suggestions = ['최근 주가는 어때?', '투자 의견을 알려줘'];
+          }
+        } catch (err) {
+          console.error('[chat] suggestion generation error:', err);
+          // 실패 시 기본 제안 사용
+          suggestions = ['최근 주가는 어때?', '투자 의견을 알려줘'];
+        }
+      } else {
+        // 이전 메시지가 없으면 기본 제안
+        suggestions = ['최근 주가는 어때?', '투자 의견을 알려줘'];
+      }
+      
       return res.status(200).json({
         text,
         asOf: asOfIso,
         mood: moodInfo.mood,
         news: newsPayload,
         macro: macroWeather,
+        suggestions: suggestions,
         visuals: {
           snapshot: {
             price: price ? {
@@ -1214,7 +1267,44 @@ ${guidelineLines.join('\n')}`.trim();
     }
 
     flushBuffer(true);
-    res.write(`data: ${JSON.stringify({ done:true, full: full.trim(), asOf: asOfIso, mood: moodInfo.mood, news: newsPayload, macro: macroWeather, visuals: {
+    
+    // LLM 기반 제안 생성 (이전 종목 메시지 기반)
+    let suggestions = [];
+    if (previousMessage) {
+      try {
+        const suggestionResp = await groq.chat.completions.create({
+          model: 'llama-3.1-8b-instant',
+          temperature: 0.7,
+          messages: [
+            {
+              role: 'system',
+              content: `너는 ${personaLabel} 종목과의 대화에서 사용자가 다음에 물어볼 만한 질문을 2개 생성하는 역할이야. 이전 종목 메시지 내용을 바탕으로 자연스럽고 관련성 높은 질문을 만들어줘. 각 질문은 한 문장으로, 간결하고 명확하게 작성해. 질문만 반환하고 다른 설명은 하지 마.`
+            },
+            {
+              role: 'user',
+              content: `이전 종목 메시지:\n${previousMessage}\n\n위 메시지 내용을 바탕으로 사용자가 다음에 물어볼 만한 질문 2개를 생성해줘. 각 질문은 한 줄로 작성하고, 줄바꿈으로 구분해줘.`
+            }
+          ],
+          max_tokens: 200
+        });
+        
+        const suggestionText = suggestionResp.choices?.[0]?.message?.content || '';
+        suggestions = suggestionText
+          .split('\n')
+          .map(s => s.trim())
+          .filter(s => s.length > 0 && !s.match(/^[0-9]+\./)) // 번호 제거
+          .slice(0, 2);
+      } catch (err) {
+        console.error('[chat] suggestion generation error:', err);
+        // 실패 시 기본 제안 사용
+        suggestions = ['최근 주가는 어때?', '투자 의견을 알려줘'];
+      }
+    } else {
+      // 이전 메시지가 없으면 기본 제안
+      suggestions = ['최근 주가는 어때?', '투자 의견을 알려줘'];
+    }
+    
+    res.write(`data: ${JSON.stringify({ done:true, full: full.trim(), asOf: asOfIso, mood: moodInfo.mood, news: newsPayload, macro: macroWeather, suggestions: suggestions, visuals: {
       snapshot: {
         price: price ? {
           last: price.last_price,
